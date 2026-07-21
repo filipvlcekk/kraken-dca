@@ -143,20 +143,25 @@ You can download the image directly from [Docker Hub](https://hub.docker.com/) u
 ```sh
 docker pull futurbroke/kraken-dca:latest
 ```
-The program will be executed every hour as a cron job in a container.<br>
-You must provide an empty order history CSV file at first launch. You can create one on unix system using:
+The program is executed every hour as a cron job in a container and now runs as an unprivileged user.<br>
+You must provide an empty order history CSV file at first launch and make sure it is writable by the container user (`uid 10001`, `gid 10001`). You can create one on Unix systems using:
 ```sh
 touch orders.csv
+chown 10001:10001 orders.csv
 ```
 To start the container with restart as system reboot use:
 ```sh
 docker run -v CONFIGURATION_FILE_PATH:/app/config.yaml \
  -v ORDERS_FILE_PATH:/app/orders.csv \
+ --env TZ=UTC \
  --name kraken-dca \
  --restart=on-failure futurbroke/kraken-dca
 ```
-- **CONFIGURATION_FILE_PATH**: Configuration folder filepath (e.g., *~/dev/config.yaml*).
+- **CONFIGURATION_FILE_PATH**: Configuration folder filepath (e.g., *~/dev/config.yaml*). Mount it read-only when possible (`CONFIGURATION_FILE_PATH:/app/config.yaml:ro`).
 - **ORDERS_FILE_PATH**: Order history CSV filepath (e.g., *~/dev/orders.csv*).
+- **TZ**: Recommended timezone for deterministic cron scheduling and logs.
+
+Prefer supplying Kraken credentials through a mounted `config.yaml` that is generated from your secret store or environment outside the repository, rather than committing secrets into version control.
 
 To see container logs:
 ```sh
@@ -171,7 +176,14 @@ docker rm kraken-dca
 # 🐍 Run without Docker
 You must specify your configuration in a *config.yaml* file in the *Kraken-DCA* root folder.
 ## Launch Kraken-DCA
-You can launch the program from the folder where you downloaded the repository folder using:
+Kraken-DCA is tested with Python 3.12. A simple local setup is:
+```sh
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+You can then launch the program from the folder where you downloaded the repository folder using:
 ```sh
 python kraken-dca
 ```

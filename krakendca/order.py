@@ -1,6 +1,7 @@
 """Order object module."""
-import math
+import re
 from datetime import datetime
+from decimal import ROUND_DOWN, Decimal
 from typing import TypeVar
 
 import pandas as pd
@@ -96,7 +97,12 @@ class Order:
         order_type = "limit"
         # Pay fee in quote asset.
         o_flags = "fciq"
-        total_price = round(price + fee, quote_decimals)
+        total_price = float(
+            cls._quantize_quote_value(
+                cls._to_decimal(price) + cls._to_decimal(fee),
+                quote_decimals,
+            )
+        )
         return cls(
             date,
             pair,
@@ -135,15 +141,19 @@ class Order:
 
         :return: None
         """
+        sanitized_order = {
+            key: self._sanitize_csv_value(value)
+            for key, value in self.__dict__.items()
+        }
         try:
             history = pd.read_csv(orders_filepath)
             history = pd.concat(
-                [history, pd.DataFrame.from_records([self.__dict__])],
+                [history, pd.DataFrame.from_records([sanitized_order])],
                 ignore_index=True,
             )
         # No order history yet.
         except (FileNotFoundError, pd.errors.EmptyDataError):
-            history = pd.DataFrame(self.__dict__, index=[0])
+            history = pd.DataFrame(sanitized_order, index=[0])
         # Bad history file format.
         except (pd.errors.ParserError, IsADirectoryError) as e:
             raise ValueError(f"Can't save order history -> {e}")
@@ -165,20 +175,20 @@ class Order:
         :param lot_decimals: Lot decimals as float.
         :return: Fee adjusted order volume as flat.
         """
-        decimals = 10**lot_decimals
         try:
+            quantize_unit = Decimal("1").scaleb(-lot_decimals)
             order_volume = (
-                math.floor(amount / pair_price * decimals) / decimals
-            )
+                Order._to_decimal(amount) / Order._to_decimal(pair_price)
+            ).quantize(quantize_unit, rounding=ROUND_DOWN)
             # Adjust amount to the 0.26% taker fee on Kraken
             order_volume_fee_adjusted = (
-                math.floor(order_volume / 1.0026 * decimals) / decimals
-            )
+                order_volume / Decimal("1.0026")
+            ).quantize(quantize_unit, rounding=ROUND_DOWN)
         except ZeroDivisionError:
             raise ZeroDivisionError(
                 "Order set_order_volume -> pair_price must not be 0."
             )
-        return order_volume_fee_adjusted
+        return float(order_volume_fee_adjusted)
 
     @staticmethod
     def estimate_order_price(
@@ -194,8 +204,10 @@ class Order:
         :param quote_decimals: Quote asset decimals as float.
         :return: Adjusted order price as float.
         """
-        order_price = volume * pair_price
-        return round(order_price, quote_decimals)
+        order_price = Order._to_decimal(volume) * Order._to_decimal(
+            pair_price
+        )
+        return float(Order._quantize_quote_value(order_price, quote_decimals))
 
     @staticmethod
     def estimate_order_fee(
@@ -211,6 +223,25 @@ class Order:
         :param quote_decimals: Quote asset decimals as float.
         :return: Order fees as float.
         """
-        order_price = volume * pair_price
-        fees = order_price * 0.0026
-        return round(fees, quote_decimals)
+        order_price = Order._to_decimal(volume) * Order._to_decimal(
+            pair_price
+        )
+        fees = order_price * Decimal("0.0026")
+        return float(Order._quantize_quote_value(fees, quote_decimals))
+
+    @staticmethod
+    def _to_decimal(value: float) -> Decimal:
+        """Convert numeric values through strings to avoid float artifacts."""
+        return Decimal(str(value))
+
+    @staticmethod
+    def _quantize_quote_value(value: Decimal, quote_decimals: int) -> Decimal:
+        """Quantize quote asset values to the required precision."""
+        return value.quantize(Decimal("1").scaleb(-quote_decimals))
+
+    @staticmethod
+    def _sanitize_csv_value(value: object) -> object:
+        """Prefix formula-like strings to avoid CSV injection."""
+        if isinstance(value, str) and re.match(r"^\s*[=+\-@]", value):
+            return f"'{value}"
+        return value

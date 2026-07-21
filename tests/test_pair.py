@@ -1,4 +1,6 @@
 """pair.py tests module."""
+from unittest.mock import Mock
+
 import pytest
 import vcr
 from krakenapi import KrakenApi
@@ -9,7 +11,7 @@ class TestPair:
     pair: Pair
     ka: KrakenApi
 
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.pair = Pair("XETHZEUR", "ETHEUR", "XETH", "ZEUR", 2, 8, 4, 0.005)
         self.ka = KrakenApi("api_public_key", "api_private_key")
 
@@ -144,3 +146,23 @@ class TestPair:
                 Pair.get_pair_ask_price(self.ka, "XETHZEUR")
         error_message = "Kraken API error -> EQuery:Unknown asset pair"
         assert error_message in str(e_info.value)
+
+    def test_get_ask_price_malformed_response(self) -> None:
+        ka = Mock()
+        ka.get_pair_ticker.return_value = {"XETHZEUR": {"a": []}}
+
+        with pytest.raises(ValueError) as e_info:
+            Pair.get_pair_ask_price(ka, "XETHZEUR")
+
+        assert str(e_info.value) == (
+            "Malformed Kraken ticker response for XETHZEUR"
+        )
+
+    def test_get_ask_price_propagates_client_errors(self) -> None:
+        ka = Mock()
+        ka.get_pair_ticker.side_effect = RuntimeError("client failure")
+
+        with pytest.raises(RuntimeError) as e_info:
+            Pair.get_pair_ask_price(ka, "XETHZEUR")
+
+        assert str(e_info.value) == "client failure"

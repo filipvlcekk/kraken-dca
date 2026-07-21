@@ -1,4 +1,6 @@
 """Configuration module."""
+import os
+
 import yaml
 from yaml.scanner import ScannerError
 
@@ -23,9 +25,14 @@ class Config:
         """
         try:
             with open(config_file, "r") as stream:
-                config = yaml.load(stream, Loader=yaml.SafeLoader)
-            self.api_public_key = config.get("api").get("public_key")
-            self.api_private_key = config.get("api").get("private_key")
+                config = yaml.load(stream, Loader=yaml.SafeLoader) or {}
+            api_config = config.get("api") or {}
+            self.api_public_key = api_config.get("public_key")
+            if self.api_public_key is None:
+                self.api_public_key = os.getenv("KRAKEN_API_PUBLIC_KEY")
+            self.api_private_key = api_config.get("private_key")
+            if self.api_private_key is None:
+                self.api_private_key = os.getenv("KRAKEN_API_PRIVATE_KEY")
             self.dca_pairs = config.get("dca_pairs")
             self.__check_configuration()
             for dca_pair in self.dca_pairs:

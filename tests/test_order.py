@@ -13,7 +13,7 @@ class TestOrder:
     order: Order
     test_orders_filepath: str = "tests/fixtures/orders.csv"
 
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.order = Order(
             datetime.strptime("2021-04-15 21:33:28", "%Y-%m-%d %H:%M:%S"),
             "XETHZEUR",
@@ -101,12 +101,13 @@ class TestOrder:
     def test_save_order_csv(self) -> None:
         self.order.txid = "OCYS4K-OILOE-36HPAE"
         self.order.description = "buy 0.00957589 ETHEUR @ limit 2083.16"
+        test_history = pd.read_csv("tests/fixtures/test_handle_dca_logic.csv")
+        test_history.iloc[[0]].to_csv(self.test_orders_filepath, index=False)
 
         # Test order history CSV saving.
         self.order.save_order_csv(self.test_orders_filepath)
         self.order.save_order_csv(self.test_orders_filepath)
         history = pd.read_csv(self.test_orders_filepath)
-        test_history = pd.read_csv("tests/fixtures/test_handle_dca_logic.csv")
         os.remove(self.test_orders_filepath)
         assert history.equals(test_history)
 
@@ -117,11 +118,41 @@ class TestOrder:
         os.rmdir(self.test_orders_filepath)
         assert "Can't save order history ->" in str(e_info.value)
 
+    def test_save_order_csv_sanitizes_formula_like_strings(self) -> None:
+        order = Order(
+            datetime.strptime("2021-04-15 21:33:28", "%Y-%m-%d %H:%M:%S"),
+            "XETHZEUR",
+            "buy",
+            "limit",
+            "fciq",
+            2083.16,
+            0.00957589,
+            19.9481,
+            0.0519,
+            20.0,
+        )
+        order.txid = " =CMD()"
+        order.description = "\t-unsafe"
+
+        order.save_order_csv(self.test_orders_filepath)
+        history = pd.read_csv(self.test_orders_filepath)
+        os.remove(self.test_orders_filepath)
+
+        assert history.loc[0, "txid"] == "' =CMD()"
+        assert history.loc[0, "description"] == "'\t-unsafe"
+        assert not isinstance(history.loc[0, "price"], str)
+        assert history.loc[0, "price"] == 19.9481
+
     def test_set_order_volume(self) -> None:
         # Test with valid parameters.
         order_volume = Order.set_order_volume(20, 1802.82, 8)
         assert type(order_volume) == float
         assert order_volume == 0.01106496
+
+        # Regression test for binary float rounding errors.
+        order_volume = Order.set_order_volume(0.09, 0.05, 8)
+        assert type(order_volume) == float
+        assert order_volume == 1.79533213
 
         with pytest.raises(ZeroDivisionError) as e_info:
             Order.set_order_volume(1802.82, 0, 8)

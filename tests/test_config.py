@@ -2,7 +2,7 @@
 from unittest import mock
 
 import pytest
-from krakendca.config import Config
+from krakendca.config import CONFIG_ERROR_MSG, Config
 from yaml.scanner import ScannerError
 
 
@@ -68,7 +68,7 @@ def test_config_properties() -> None:
     )
 
 
-def mock_config_error(config: str, error_type: type) -> str:
+def mock_config_error(config: str, error_type: type, env: dict = None) -> str:
     """
     Mock configuration file error and return the error.
 
@@ -80,10 +80,25 @@ def mock_config_error(config: str, error_type: type) -> str:
     with mock.patch("builtins.open", mock_file) as mock_open:
         if error_type == FileNotFoundError:
             mock_open.side_effect = FileNotFoundError()
-        with pytest.raises(error_type) as e_info:
-            Config("config-sample.yaml")
+        with mock.patch.dict("os.environ", env or {}, clear=True):
+            with pytest.raises(error_type) as e_info:
+                Config("config-sample.yaml")
     e_info: str = str(e_info.value)
     return e_info
+
+
+def mock_config(config: str, env: dict = None) -> Config:
+    """
+    Mock configuration file and return Config instance.
+
+    :param config: Configuration to use as string.
+    :param env: Environment variables to use during initialization.
+    :return: Config instance.
+    """
+    mock_file = mock.mock_open(read_data=config)
+    with mock.patch("builtins.open", mock_file):
+        with mock.patch.dict("os.environ", env or {}, clear=True):
+            return Config("config-sample.yaml")
 
 
 class TestConfig:
@@ -91,7 +106,7 @@ class TestConfig:
 
     config: str
 
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         """Load test config.yaml file."""
         self.config = get_config()
 
@@ -195,3 +210,68 @@ class TestConfig:
         )
         e_info: str = mock_config_error(bad_config, ValueError)
         assert "ignore_differing_orders must be a boolean." in e_info
+
+    def test_api_keys_fallback_to_environment(self) -> None:
+        """Test API keys fall back to environment variables."""
+        config_without_keys: str = self.config.replace(
+            'public_key: "KRAKEN_API_PUBLIC_KEY"\n', ""
+        ).replace('private_key: "KRAKEN_API_PRIVATE_KEY"\n', "")
+        config = mock_config(
+            config_without_keys,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC_KEY",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE_KEY",
+            },
+        )
+        assert config.api_public_key == "ENV_PUBLIC_KEY"
+        assert config.api_private_key == "ENV_PRIVATE_KEY"
+
+    def test_config_api_keys_override_environment(self) -> None:
+        """Test configuration file API keys take precedence over env."""
+        config = mock_config(
+            self.config,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC_KEY",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE_KEY",
+            },
+        )
+        assert config.api_public_key == "KRAKEN_API_PUBLIC_KEY"
+        assert config.api_private_key == "KRAKEN_API_PRIVATE_KEY"
+
+    def test_missing_api_keys_without_env_keeps_error_message(self) -> None:
+        """Test missing API keys still raise the same validation error."""
+        config_without_keys: str = self.config.replace(
+            'public_key: "KRAKEN_API_PUBLIC_KEY"\n', ""
+        ).replace('private_key: "KRAKEN_API_PRIVATE_KEY"\n', "")
+        e_info = mock_config_error(config_without_keys, ValueError)
+        assert (
+            e_info
+            == f"{CONFIG_ERROR_MSG}: "
+            "Please provide your Kraken API public key."
+        )
+
+    def test_missing_api_section_uses_environment_keys(self) -> None:
+        """Test missing api section still works with env fallback."""
+        config_without_api: str = self.config.replace(
+            'api:\n  public_key: "KRAKEN_API_PUBLIC_KEY"\n'
+            '  private_key: "KRAKEN_API_PRIVATE_KEY"\n\n',
+            "",
+        )
+        config = mock_config(
+            config_without_api,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC_KEY",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE_KEY",
+            },
+        )
+        assert config.api_public_key == "ENV_PUBLIC_KEY"
+        assert config.api_private_key == "ENV_PRIVATE_KEY"
+
+    def test_empty_yaml_keeps_validation_error_message(self) -> None:
+        """Test empty YAML triggers the existing validation error."""
+        e_info = mock_config_error("", ValueError)
+        assert (
+            e_info
+            == f"{CONFIG_ERROR_MSG}: "
+            "Please provide your Kraken API public key."
+        )

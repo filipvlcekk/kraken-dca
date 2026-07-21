@@ -1,26 +1,41 @@
-FROM python:3.8-slim-buster
+FROM python:3.12-slim-bookworm@sha256:8a7e7cc04fd3e2bd787f7f24e22d5d119aa590d429b50c95dfe12b3abe52f48b
 
-# Install cron
-RUN apt-get update && apt-get -y install cron
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Set /app as working directory
+RUN set -eux; \
+    apt-get update; \
+    apt-get install --yes --no-install-recommends cron; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    groupadd --gid 10001 krakendca; \
+    useradd --uid 10001 --gid 10001 --groups crontab --create-home --shell /usr/sbin/nologin krakendca
+
 WORKDIR /app
 
-# Copy and install Python requirements
-COPY requirements.txt requirements.txt
-RUN pip3 install -r requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt && rm -f /tmp/requirements.txt
 
-# Copy application files
-COPY krakendca/ krakendca/
-COPY config-sample.yaml config.yaml
-COPY __main__.py __main__.py
+COPY --chown=krakendca:krakendca krakendca/ /app/krakendca/
+COPY --chown=krakendca:krakendca config-sample.yaml /app/config.yaml
+COPY --chown=krakendca:krakendca __main__.py /app/__main__.py
 
-# Create order history file
-RUN sh -c "touch orders.csv"
+RUN set -eux; \
+    touch /app/orders.csv; \
+    chown -R krakendca:krakendca /app; \
+    mkdir -p /var/run; \
+    touch /var/run/crond.pid; \
+    chown krakendca:krakendca /var/run/crond.pid
 
-# Copy and install crontab command
-COPY crontab /etc/cron.d/crontab
-RUN chmod 0644 /etc/cron.d/crontab
-RUN /usr/bin/crontab /etc/cron.d/crontab
+COPY crontab /tmp/kraken-dca.cron
+RUN set -eux; \
+    chmod 0600 /tmp/kraken-dca.cron; \
+    crontab -u krakendca /tmp/kraken-dca.cron; \
+    rm -f /tmp/kraken-dca.cron
+
+USER krakendca
 
 CMD ["cron", "-f"]

@@ -135,7 +135,13 @@ class Pair:
         :return: Current pair ask price.
         """
         pair_ticker_information = ka.get_pair_ticker(pair_name)
-        pair_ask_price = float(
-            pair_ticker_information.get(pair_name).get("a")[0]
-        )
-        return pair_ask_price
+        try:
+            pair_information = pair_ticker_information[pair_name]
+            ask_prices = pair_information["a"]
+            if not isinstance(ask_prices, list) or not ask_prices:
+                raise TypeError
+            return float(ask_prices[0])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(
+                f"Malformed Kraken ticker response for {pair_name}"
+            )

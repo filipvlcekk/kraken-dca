@@ -7,21 +7,23 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - name: Set up Python 3.12
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
         with:
-          python-version: 3.8
+          python-version: "3.12"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest-cov==3.0.0 freezegun==1.1.0 pytz==2021.1 vcrpy==4.1.1
-          pip install coveralls
+          python -m pip install -r requirements.txt
+          python -m pip install pytest==8.3.3 pytest-cov==5.0.0 freezegun==1.5.1 pytz==2024.2 vcrpy==6.0.2 coveralls==4.0.1
       - name: Test with pytest
         run: pytest -vv --cov krakendca/
       - name: Push test coverage to coveralls

@@ -17,7 +17,7 @@ class TestKrakenDCA:
         "tests/fixtures/vcr_cassettes/test_krakendca_setup.yaml",
         filter_headers=["API-Key", "API-Sign"],
     )
-    def setup(self):
+    def setup_method(self):
         # Initialize DCA test object - Fake keys.
         self.ka = KrakenApi(
             "R6/OvXmIQEv1E8nyJd7+a9Zmaf84yJ7uifwe2yj5BgV1N+lgqURsxQwQ",
