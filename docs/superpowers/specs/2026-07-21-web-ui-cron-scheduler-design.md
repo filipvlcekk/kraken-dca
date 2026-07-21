@@ -119,7 +119,7 @@ API responses should use a consistent shape:
 }
 ```
 
-Successful responses should use `{"ok": true, "data": ...}`.
+Successful responses should use `{"ok": true, "data": {"field": "value"}}` with endpoint-specific data.
 
 Use these status codes:
 
@@ -134,14 +134,14 @@ API contract:
 
 | Endpoint | Request | Success response |
 | --- | --- | --- |
-| `GET /api/session` | empty | `{"ok": true, "data": {"authenticated": true, "csrf_token": "..."}}` |
-| `POST /api/session` | `{"password": "..."}` | `{"ok": true, "data": {"authenticated": true, "csrf_token": "..."}}` and a session cookie |
+| `GET /api/session` | empty | `{"ok": true, "data": {"authenticated": true, "csrf_token": "csrf-token-value"}}` |
+| `POST /api/session` | `{"password": "user-password"}` | `{"ok": true, "data": {"authenticated": true, "csrf_token": "csrf-token-value"}}` and a session cookie |
 | `DELETE /api/session` | empty | `{"ok": true, "data": {"authenticated": false}}` |
-| `GET /api/config` | empty | `{"ok": true, "data": {"config": {...}, "secrets": {...}, "config_valid": true, "validation_errors": []}}` |
-| `PUT /api/config` | `{"config": {...}}` | `{"ok": true, "data": {"config": {...}, "scheduler": {...}}}` |
-| `GET /api/scheduler` | empty | `{"ok": true, "data": {"running": true, "config_applied": true, "jobs": [...], "last_reload_at": "..."}}` |
-| `POST /api/scheduler/reload` | empty | `{"ok": true, "data": {"scheduler": {...}}}` |
-| `POST /api/pairs/{pair}/run` | empty | `{"ok": true, "data": {"pair": "...", "status": "completed", "started_at": "...", "finished_at": "..."}}` |
+| `GET /api/config` | empty | `{"ok": true, "data": {"config": {"dca_pairs": []}, "secrets": {"public_key": {"configured": true, "source": "file"}}, "config_valid": true, "validation_errors": []}}` |
+| `PUT /api/config` | `{"config": {"dca_pairs": []}}` | `{"ok": true, "data": {"config": {"dca_pairs": []}, "scheduler": {"config_applied": true}}}` |
+| `GET /api/scheduler` | empty | `{"ok": true, "data": {"running": true, "config_applied": true, "jobs": [], "last_reload_at": "2026-07-21T10:00:00Z"}}` |
+| `POST /api/scheduler/reload` | empty | `{"ok": true, "data": {"scheduler": {"running": true, "config_applied": true}}}` |
+| `POST /api/pairs/{pair}/run` | empty | `{"ok": true, "data": {"pair": "XETHZEUR", "status": "completed", "started_at": "2026-07-21T10:00:00Z", "finished_at": "2026-07-21T10:00:03Z"}}` |
 
 Scheduler job response shape:
 
@@ -393,8 +393,8 @@ Scheduler mismatch response shape:
 {
   "running": true,
   "config_applied": false,
-  "saved_config_fingerprint": "sha256:...",
-  "active_config_fingerprint": "sha256:...",
+  "saved_config_fingerprint": "sha256:abc123",
+  "active_config_fingerprint": "sha256:def456",
   "reload_error": "Failed to replace APScheduler jobs: scheduler unavailable",
   "jobs": []
 }
