@@ -1,6 +1,9 @@
 """Dollar Cost Averaging module."""
 import logging
+import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from krakenapi import KrakenApi
@@ -17,6 +20,16 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class DCAOutcome:
+    """Typed result of one DCA attempt."""
+
+    status: str
+    reason: Optional[str]
+    order_txid: Optional[str]
+    message: str
+
+
 class DCA:
     """
     Dollar Cost Averaging encapsulation.
@@ -30,6 +43,7 @@ class DCA:
     limit_factor: float
     max_price: float
     ignore_differing_orders: bool
+    min_order_interval_minutes: Optional[int]
 
     def __init__(
         self,
@@ -41,6 +55,7 @@ class DCA:
         max_price: float = -1,
         ignore_differing_orders: bool = False,
         orders_filepath: str = "orders.csv",
+        min_order_interval_minutes: Optional[int] = None,
     ) -> None:
         """
         Initialize the DCA object.
@@ -56,6 +71,9 @@ class DCA:
                                         have an amount that differs more
                                         than 1% from this DCA's amount.
         :param orders_filepath: Orders save file path as String.
+        :param min_order_interval_minutes: Cron-safe minutes delay between
+                                           orders. None preserves legacy
+                                           daily delay behavior.
         """
         self.ka = ka
         self.delay = delay
@@ -65,6 +83,7 @@ class DCA:
         self.max_price = float(max_price)
         self.ignore_differing_orders = ignore_differing_orders
         self.orders_filepath = orders_filepath
+        self.min_order_interval_minutes = min_order_interval_minutes
 
     def __str__(self) -> str:
         desc: str = (
@@ -77,23 +96,34 @@ class DCA:
             desc += f", max_price: {self.max_price}"
         return desc
 
-    def handle_dca_logic(self) -> None:
+    def handle_dca_logic(self) -> DCAOutcome:
         """
         Handle DCA logic.
 
-        :return: None
+        :return: DCAOutcome
         """
         # Check current system time.
         current_date = self.get_system_time()
         # Check Kraken account balance.
-        self.check_account_balance()
+        try:
+            self.check_account_balance()
+        except ValueError as exc:
+            if "Insufficient funds" not in str(exc):
+                raise
+            return DCAOutcome(
+                "failed",
+                "insufficient_funds",
+                None,
+                str(exc),
+            )
         # Check if didn't already DCA today
         if self.count_pair_daily_orders() != 0:
-            logger.warning(
+            message = (
                 f"No DCA for {self.pair.name}: Already placed an order "
                 f"today."
             )
-            return
+            logger.warning(message)
+            return DCAOutcome("skipped", "duplicate_order", None, message)
         logger.info("Didn't DCA already today.")
         # Get current pair ask price.
         pair_ask_price = self.pair.get_pair_ask_price(self.ka, self.pair.name)
@@ -104,11 +134,14 @@ class DCA:
         )
         # Reject DCA if limit_price greater than max_price
         if self.max_price != -1 and limit_price > self.max_price:
-            logger.info(
+            message = (
                 f"No DCA for {self.pair.name}: Limit price ({limit_price}) "
                 f"greater than maximum price ({self.max_price})."
             )
-            return
+            logger.info(message)
+            return DCAOutcome(
+                "skipped", "max_price_exceeded", None, message
+            )
         # Create the Order object.
         order = Order.buy_limit_order(
             current_date,
@@ -118,11 +151,39 @@ class DCA:
             self.pair.lot_decimals,
             self.pair.quote_decimals,
         )
+        try:
+            self.check_order_history_writable()
+        except ValueError as exc:
+            message = (
+                f"Order history is not writable for "
+                f"{self.orders_filepath}: {exc}. No order submitted."
+            )
+            logger.error(message)
+            return DCAOutcome("failed", "history_unwritable", None, message)
         # Send buy order to Kraken API and print information.
         self.send_buy_limit_order(order)
         # Save order information to CSV file.
-        order.save_order_csv(self.orders_filepath)
+        try:
+            order.save_order_csv(self.orders_filepath)
+        except (OSError, ValueError) as exc:
+            message = (
+                "Order history persistence failed after order submission; "
+                f"order may already have been placed. {exc}"
+            )
+            logger.warning(message)
+            return DCAOutcome(
+                "failed",
+                "history_persistence_failed",
+                getattr(order, "txid", None),
+                message,
+            )
         logger.info("Order information saved to CSV.")
+        return DCAOutcome(
+            "completed",
+            None,
+            getattr(order, "txid", None),
+            "Order submitted and history saved.",
+        )
 
     def get_limit_price(
         self, pair_ask_price: float, pair_decimals: int
@@ -212,24 +273,66 @@ class DCA:
         )
 
         # Get daily closed orders.
-        start_day_datetime = current_utc_day_datetime() - timedelta(
-            days=self.delay - 1
-        )
-        start_day_unix = datetime_as_utc_unix(start_day_datetime)
-        closed_orders = self.ka.get_closed_orders(
-            {"start": start_day_unix, "closetime": "open"}
-        )
-        daily_closed_orders = len(
-            self.extract_pair_orders(
-                closed_orders,
-                self.pair.name,
-                self.pair.alt_name,
-                filter_amount,
+        daily_closed_orders = 0
+        if self.min_order_interval_minutes is None:
+            start_day_datetime = current_utc_day_datetime() - timedelta(
+                days=self.delay - 1
             )
-        )
+            start_day_unix = datetime_as_utc_unix(start_day_datetime)
+            closed_orders = self.ka.get_closed_orders(
+                {"start": start_day_unix, "closetime": "open"}
+            )
+            daily_closed_orders = len(
+                self.extract_pair_orders(
+                    closed_orders,
+                    self.pair.name,
+                    self.pair.alt_name,
+                    filter_amount,
+                )
+            )
+        elif self.min_order_interval_minutes > 0:
+            start_datetime = current_utc_datetime() - timedelta(
+                minutes=self.min_order_interval_minutes
+            )
+            start_unix = datetime_as_utc_unix(start_datetime)
+            closed_orders = self.ka.get_closed_orders(
+                {"start": start_unix, "closetime": "open"}
+            )
+            daily_closed_orders = len(
+                self.extract_pair_orders(
+                    closed_orders,
+                    self.pair.name,
+                    self.pair.alt_name,
+                    filter_amount,
+                )
+            )
         # Sum the count of closed and daily open orders for the DCA pair.
         pair_daily_orders = daily_closed_orders + daily_open_orders
         return pair_daily_orders
+
+    def check_order_history_writable(self) -> None:
+        """
+        Detect obvious order history write failures before submitting.
+
+        :return: None.
+        """
+        orders_path = Path(self.orders_filepath)
+        if orders_path.exists():
+            if orders_path.is_dir():
+                raise ValueError("path is a directory")
+            if not os.access(orders_path, os.W_OK):
+                raise ValueError("file is not writable")
+            return
+
+        parent = orders_path.parent
+        if not parent:
+            parent = Path(".")
+        if not parent.exists():
+            raise ValueError(f"parent directory does not exist: {parent}")
+        if not parent.is_dir():
+            raise ValueError(f"parent path is not a directory: {parent}")
+        if not os.access(parent, os.W_OK):
+            raise ValueError(f"parent directory is not writable: {parent}")
 
     @staticmethod
     def extract_pair_orders(

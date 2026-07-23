@@ -13,6 +13,81 @@ from krakendca.order import Order
 from krakendca.pair import Pair
 
 
+class FakeKrakenApi:
+    """Small Kraken API fake for DCA unit tests."""
+
+    def __init__(
+        self,
+        *,
+        balance: str = "100.0",
+        open_orders: dict | None = None,
+        closed_orders: dict | None = None,
+        ask_price: str = "100.0",
+    ) -> None:
+        self.balance = balance
+        self.open_orders = open_orders or {}
+        self.closed_orders = closed_orders or {}
+        self.ask_price = ask_price
+        self.closed_order_queries: list[dict] = []
+        self.created_orders: list[dict] = []
+
+    def get_time(self) -> int:
+        return 1620000000
+
+    def get_trade_balance(self) -> dict:
+        return {"eb": "100.0"}
+
+    def get_balance(self) -> dict:
+        return {"ZEUR": self.balance, "XETH": "0.0"}
+
+    def get_open_orders(self) -> dict:
+        return self.open_orders
+
+    def get_closed_orders(self, query: dict) -> dict:
+        self.closed_order_queries.append(query)
+        return self.closed_orders
+
+    def get_pair_ticker(self, pair_name: str) -> dict:
+        return {pair_name: {"a": [self.ask_price, "1", "1"]}}
+
+    def create_order(
+        self,
+        pair: str,
+        type: str,
+        order_type: str,
+        pair_price: float,
+        volume: float,
+        o_flags: str,
+    ) -> dict:
+        self.created_orders.append(
+            {
+                "pair": pair,
+                "type": type,
+                "order_type": order_type,
+                "pair_price": pair_price,
+                "volume": volume,
+                "o_flags": o_flags,
+            }
+        )
+        return {
+            "txid": ["OTEST-ORDER-TXID"],
+            "descr": {"order": "buy 0.19948000 ETHEUR @ limit 100.0"},
+        }
+
+
+def fake_pair() -> Pair:
+    return Pair("XETHZEUR", "ETHEUR", "XETH", "ZEUR", 2, 8, 4, 0.005)
+
+
+def fake_order(pair: str = "ETHEUR", amount: float = 20.0) -> dict:
+    return {
+        "order-id": {
+            "descr": {"pair": pair, "price": "100.0"},
+            "vol": str(amount / 100.0),
+        }
+    }
+
+
 class TestDCA:
     """Test DCA class"""
 
@@ -345,3 +420,100 @@ class TestDCA:
         assert self.dca.get_limit_price(3896.01, 1) == 3896.01
         self.dca.limit_factor = 0.98
         assert self.dca.get_limit_price(3896.01, 1) == 3818.1
+
+    def test_min_order_interval_zero_skips_closed_order_lookback(self):
+        ka = FakeKrakenApi()
+        dca = DCA(
+            ka,
+            1,
+            fake_pair(),
+            20.0,
+            min_order_interval_minutes=0,
+        )
+
+        assert dca.count_pair_daily_orders() == 0
+        assert ka.closed_order_queries == []
+
+    def test_ignore_differing_orders_applies_to_open_and_closed_cron_checks(
+        self,
+    ):
+        open_orders = fake_order(amount=10.0)
+        closed_orders = fake_order(amount=30.0)
+
+        strict_dca = DCA(
+            FakeKrakenApi(
+                open_orders=open_orders,
+                closed_orders=closed_orders,
+            ),
+            1,
+            fake_pair(),
+            20.0,
+            min_order_interval_minutes=30,
+            ignore_differing_orders=False,
+        )
+        lenient_dca = DCA(
+            FakeKrakenApi(
+                open_orders=open_orders,
+                closed_orders=closed_orders,
+            ),
+            1,
+            fake_pair(),
+            20.0,
+            min_order_interval_minutes=30,
+            ignore_differing_orders=True,
+        )
+
+        assert strict_dca.count_pair_daily_orders() == 2
+        assert lenient_dca.count_pair_daily_orders() == 0
+
+    @freeze_time("2021-05-03 00:00:00")
+    def test_unwritable_order_history_returns_failure_before_submission(
+        self,
+        tmp_path,
+    ):
+        orders_path = tmp_path / "orders.csv"
+        orders_path.mkdir()
+        ka = FakeKrakenApi()
+        dca = DCA(
+            ka,
+            1,
+            fake_pair(),
+            20.0,
+            orders_filepath=str(orders_path),
+        )
+
+        outcome = dca.handle_dca_logic()
+
+        assert outcome.status == "failed"
+        assert outcome.reason == "history_unwritable"
+        assert outcome.order_txid is None
+        assert "Order history is not writable" in outcome.message
+        assert ka.created_orders == []
+
+    @freeze_time("2021-05-03 00:00:00")
+    def test_history_persistence_failure_after_submission_returns_outcome(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        ka = FakeKrakenApi()
+        dca = DCA(
+            ka,
+            1,
+            fake_pair(),
+            20.0,
+            orders_filepath=str(tmp_path / "orders.csv"),
+        )
+
+        def fail_save_order_csv(self, orders_filepath):
+            raise ValueError("Can't save order history -> malformed")
+
+        monkeypatch.setattr(Order, "save_order_csv", fail_save_order_csv)
+
+        outcome = dca.handle_dca_logic()
+
+        assert outcome.status == "failed"
+        assert outcome.reason == "history_persistence_failed"
+        assert outcome.order_txid == "OTEST-ORDER-TXID"
+        assert "may already have been placed" in outcome.message
+        assert len(ka.created_orders) == 1
