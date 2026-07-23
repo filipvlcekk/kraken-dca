@@ -34,6 +34,10 @@ class _JobSpec:
     trigger: CronTrigger
 
 
+class _ReloadAborted(RuntimeError):
+    """Internal signal for lifecycle races that should not mutate active state."""
+
+
 class SchedulerService:
     """Manage scheduled and manual single-pair DCA runs."""
 
@@ -53,6 +57,7 @@ class SchedulerService:
         self._pair_locks: dict[str, threading.Lock] = {}
         self._job_specs: dict[str, _JobSpec] = {}
         self._active_config: dict | None = None
+        self._shutdown_requested = False
 
         self.saved_config_fingerprint: str | None = None
         self.active_config_fingerprint: str | None = None
@@ -66,18 +71,22 @@ class SchedulerService:
             normalized = config_store.validate_config(config, self._env)
             fingerprint = config_store.fingerprint_config(normalized, self._env)
             specs = self._build_job_specs(normalized)
+            if self._shutdown_requested:
+                self._scheduler = self._create_scheduler()
             self._add_specs_to_scheduler(self._scheduler, specs, normalized)
             self._active_config = normalized
             self._job_specs = {spec.id: spec for spec in specs}
             self.saved_config_fingerprint = fingerprint
             self.active_config_fingerprint = fingerprint
             self.reload_error = None
+            self._shutdown_requested = False
             if not self._scheduler.running:
                 self._scheduler.start()
 
     def shutdown(self) -> None:
         """Stop APScheduler if it is running."""
         with self._state_lock:
+            self._shutdown_requested = True
             scheduler = self._scheduler
             running = scheduler.running
         if running:
@@ -96,6 +105,9 @@ class SchedulerService:
             self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
             with self._state_lock:
                 active_scheduler_running = self._scheduler.running
+                shutdown_requested = self._shutdown_requested
+            if shutdown_requested:
+                raise _ReloadAborted("shutdown requested during scheduler reload")
             if active_scheduler_running:
                 replacement_scheduler.start()
         except Exception as exc:
@@ -112,15 +124,27 @@ class SchedulerService:
             return self.status()
 
         old_scheduler = None
+        abort_started_replacement = False
         with self._state_lock:
-            old_scheduler = self._scheduler
-            self.saved_config_fingerprint = saved_fingerprint
-            self.last_reload_at = last_reload_at
-            self._scheduler = replacement_scheduler
-            self._active_config = normalized
-            self._job_specs = {spec.id: spec for spec in specs}
-            self.active_config_fingerprint = saved_fingerprint
-            self.reload_error = None
+            if self._shutdown_requested:
+                self.saved_config_fingerprint = saved_fingerprint
+                self.last_reload_at = last_reload_at
+                self.reload_error = "shutdown requested during scheduler reload"
+                abort_started_replacement = True
+            else:
+                old_scheduler = self._scheduler
+                self.saved_config_fingerprint = saved_fingerprint
+                self.last_reload_at = last_reload_at
+                self._scheduler = replacement_scheduler
+                self._active_config = normalized
+                self._job_specs = {spec.id: spec for spec in specs}
+                self.active_config_fingerprint = saved_fingerprint
+                self.reload_error = None
+
+        if abort_started_replacement:
+            if replacement_scheduler is not None and replacement_scheduler.running:
+                replacement_scheduler.shutdown(wait=True)
+            return self.status()
 
         if old_scheduler is not None and old_scheduler.running:
             old_scheduler.shutdown(wait=True)

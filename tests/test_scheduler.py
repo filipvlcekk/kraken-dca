@@ -892,6 +892,31 @@ def test_replacement_scheduled_job_callback_uses_new_config_before_swap(
     assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 2
 
 
+def test_reload_does_not_publish_replacement_after_shutdown_interleaves(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config([_pair("XETHZEUR", delay=1)])
+    new_config = _config([_pair("XXBTZEUR", delay=1)])
+    old_fingerprint = fingerprint_config(old_config, {})
+    new_fingerprint = fingerprint_config(new_config, {})
+    service = _started_service(tmp_path, old_config)
+
+    def on_start(_replacement_scheduler) -> None:
+        service.shutdown()
+
+    _observe_replacement_scheduler_start(monkeypatch, on_start)
+
+    status = service.reload(new_config)
+
+    assert status["running"] is False
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] == new_fingerprint
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert "shutdown" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+
+
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
     tmp_path,
 ) -> None:
