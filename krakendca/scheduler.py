@@ -53,6 +53,7 @@ class SchedulerService:
         self._kraken_api_factory = kraken_api_factory or KrakenApi
         self._runner = runner or run_pair
         self._scheduler = self._create_scheduler()
+        self._lifecycle_lock = threading.Lock()
         self._state_lock = threading.RLock()
         self._pair_locks: dict[str, threading.Lock] = {}
         self._job_specs: dict[str, _JobSpec] = {}
@@ -66,89 +67,92 @@ class SchedulerService:
 
     def start(self) -> None:
         """Load config, register active jobs, and start APScheduler."""
-        with self._state_lock:
-            config = config_store.load_config(self.config_path)
-            normalized = config_store.validate_config(config, self._env)
-            fingerprint = config_store.fingerprint_config(normalized, self._env)
-            specs = self._build_job_specs(normalized)
-            if self._shutdown_requested:
-                self._scheduler = self._create_scheduler()
-            self._add_specs_to_scheduler(self._scheduler, specs, normalized)
-            self._active_config = normalized
-            self._job_specs = {spec.id: spec for spec in specs}
-            self.saved_config_fingerprint = fingerprint
-            self.active_config_fingerprint = fingerprint
-            self.reload_error = None
-            self._shutdown_requested = False
-            if not self._scheduler.running:
-                self._scheduler.start()
+        with self._lifecycle_lock:
+            with self._state_lock:
+                config = config_store.load_config(self.config_path)
+                normalized = config_store.validate_config(config, self._env)
+                fingerprint = config_store.fingerprint_config(normalized, self._env)
+                specs = self._build_job_specs(normalized)
+                if self._shutdown_requested:
+                    self._scheduler = self._create_scheduler()
+                self._add_specs_to_scheduler(self._scheduler, specs, normalized)
+                self._active_config = normalized
+                self._job_specs = {spec.id: spec for spec in specs}
+                self.saved_config_fingerprint = fingerprint
+                self.active_config_fingerprint = fingerprint
+                self.reload_error = None
+                self._shutdown_requested = False
+                if not self._scheduler.running:
+                    self._scheduler.start()
 
     def shutdown(self) -> None:
         """Stop APScheduler if it is running."""
-        with self._state_lock:
-            self._shutdown_requested = True
-            scheduler = self._scheduler
-            running = scheduler.running
-        if running:
-            scheduler.shutdown(wait=True)
+        with self._lifecycle_lock:
+            with self._state_lock:
+                self._shutdown_requested = True
+                scheduler = self._scheduler
+                running = scheduler.running
+            if running:
+                scheduler.shutdown(wait=True)
 
     def reload(self, config: dict) -> dict:
         """Validate config and atomically replace active scheduler jobs."""
-        normalized = config_store.validate_config(config, self._env)
-        saved_fingerprint = config_store.fingerprint_config(normalized, self._env)
-        last_reload_at = _utc_now_iso()
-        replacement_scheduler = None
+        with self._lifecycle_lock:
+            normalized = config_store.validate_config(config, self._env)
+            saved_fingerprint = config_store.fingerprint_config(normalized, self._env)
+            last_reload_at = _utc_now_iso()
+            replacement_scheduler = None
 
-        try:
-            specs = self._build_job_specs(normalized)
-            replacement_scheduler = self._create_scheduler()
-            self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
+            try:
+                specs = self._build_job_specs(normalized)
+                replacement_scheduler = self._create_scheduler()
+                self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
+                with self._state_lock:
+                    active_scheduler_running = self._scheduler.running
+                    shutdown_requested = self._shutdown_requested
+                if shutdown_requested:
+                    raise _ReloadAborted("shutdown requested during scheduler reload")
+                if active_scheduler_running:
+                    replacement_scheduler.start()
+            except Exception as exc:
+                if (
+                    replacement_scheduler is not None
+                    and replacement_scheduler.running
+                ):
+                    replacement_scheduler.shutdown(wait=True)
+                with self._state_lock:
+                    self.saved_config_fingerprint = saved_fingerprint
+                    self.last_reload_at = last_reload_at
+                    self.reload_error = str(exc)
+                logger.exception("Scheduler reload failed.")
+                return self.status()
+
+            old_scheduler = None
+            abort_started_replacement = False
             with self._state_lock:
-                active_scheduler_running = self._scheduler.running
-                shutdown_requested = self._shutdown_requested
-            if shutdown_requested:
-                raise _ReloadAborted("shutdown requested during scheduler reload")
-            if active_scheduler_running:
-                replacement_scheduler.start()
-        except Exception as exc:
-            if (
-                replacement_scheduler is not None
-                and replacement_scheduler.running
-            ):
-                replacement_scheduler.shutdown(wait=True)
-            with self._state_lock:
-                self.saved_config_fingerprint = saved_fingerprint
-                self.last_reload_at = last_reload_at
-                self.reload_error = str(exc)
-            logger.exception("Scheduler reload failed.")
+                if self._shutdown_requested:
+                    self.saved_config_fingerprint = saved_fingerprint
+                    self.last_reload_at = last_reload_at
+                    self.reload_error = "shutdown requested during scheduler reload"
+                    abort_started_replacement = True
+                else:
+                    old_scheduler = self._scheduler
+                    self.saved_config_fingerprint = saved_fingerprint
+                    self.last_reload_at = last_reload_at
+                    self._scheduler = replacement_scheduler
+                    self._active_config = normalized
+                    self._job_specs = {spec.id: spec for spec in specs}
+                    self.active_config_fingerprint = saved_fingerprint
+                    self.reload_error = None
+
+            if abort_started_replacement:
+                if replacement_scheduler is not None and replacement_scheduler.running:
+                    replacement_scheduler.shutdown(wait=True)
+                return self.status()
+
+            if old_scheduler is not None and old_scheduler.running:
+                old_scheduler.shutdown(wait=True)
             return self.status()
-
-        old_scheduler = None
-        abort_started_replacement = False
-        with self._state_lock:
-            if self._shutdown_requested:
-                self.saved_config_fingerprint = saved_fingerprint
-                self.last_reload_at = last_reload_at
-                self.reload_error = "shutdown requested during scheduler reload"
-                abort_started_replacement = True
-            else:
-                old_scheduler = self._scheduler
-                self.saved_config_fingerprint = saved_fingerprint
-                self.last_reload_at = last_reload_at
-                self._scheduler = replacement_scheduler
-                self._active_config = normalized
-                self._job_specs = {spec.id: spec for spec in specs}
-                self.active_config_fingerprint = saved_fingerprint
-                self.reload_error = None
-
-        if abort_started_replacement:
-            if replacement_scheduler is not None and replacement_scheduler.running:
-                replacement_scheduler.shutdown(wait=True)
-            return self.status()
-
-        if old_scheduler is not None and old_scheduler.running:
-            old_scheduler.shutdown(wait=True)
-        return self.status()
 
     def status(self) -> dict:
         """Return scheduler state and public job metadata."""

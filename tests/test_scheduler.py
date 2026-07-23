@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -97,6 +98,35 @@ class FakeRunner:
         return _ok_result(pair)
 
 
+class _ThreadRun:
+    def __init__(self, target) -> None:
+        self._target = target
+        self.finished = threading.Event()
+        self.result = None
+        self.error: BaseException | None = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        try:
+            self.result = self._target()
+        except BaseException as exc:
+            self.error = exc
+        finally:
+            self.finished.set()
+
+    def wait_finished(self, timeout: float = 5.0):
+        assert self.finished.wait(timeout), "thread did not finish"
+        self.thread.join(timeout=0)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _wait_for(event: threading.Event, reason: str, timeout: float = 5.0) -> None:
+    assert event.wait(timeout), reason
+
+
 def _fail_replacement_scheduler(
     monkeypatch,
     *,
@@ -148,6 +178,36 @@ def _observe_replacement_scheduler_start(monkeypatch, on_start) -> None:
         @property
         def running(self) -> bool:
             return self._scheduler.running
+
+        def start(self, *args, **kwargs):
+            on_start(self)
+            return self._scheduler.start(*args, **kwargs)
+
+        def __getattr__(self, name: str):
+            return getattr(self._scheduler, name)
+
+    monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
+
+
+def _control_replacement_scheduler_start(monkeypatch, on_start) -> None:
+    import krakendca.scheduler as scheduler_module
+
+    original_scheduler = scheduler_module.BackgroundScheduler
+
+    class ControlledScheduler:
+        def __init__(self, *args, **kwargs) -> None:
+            self._scheduler = original_scheduler(*args, **kwargs)
+            self.job_ids: set[str] = set()
+
+        @property
+        def running(self) -> bool:
+            return self._scheduler.running
+
+        def add_job(self, *args, **kwargs):
+            job_id = kwargs.get("id")
+            if job_id is not None:
+                self.job_ids.add(job_id)
+            return self._scheduler.add_job(*args, **kwargs)
 
         def start(self, *args, **kwargs):
             on_start(self)
@@ -294,6 +354,107 @@ def test_reload_success_replaces_jobs_and_updates_lifecycle_state(tmp_path) -> N
     assert status["reload_error"] is None
     assert status["last_reload_at"] is not None
     assert {job["id"] for job in status["jobs"]} == {"dca:XXBTZEUR"}
+
+
+def test_overlapping_reloads_cannot_publish_older_replacement_after_newer(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    initial_config = _config([_pair("XETHZEUR", delay=1)])
+    older_config = _config([_pair("XXBTZEUR", delay=1)])
+    newer_config = _config([_pair("XLTCZEUR", delay=1)])
+    newer_fingerprint = fingerprint_config(newer_config, {})
+    service = _started_service(tmp_path, initial_config)
+    older_replacement_started = threading.Event()
+    newer_replacement_started = threading.Event()
+    release_older_replacement = threading.Event()
+
+    def on_start(replacement_scheduler) -> None:
+        if "legacy-delay:XXBTZEUR" in replacement_scheduler.job_ids:
+            older_replacement_started.set()
+            _wait_for(
+                release_older_replacement,
+                "older replacement was not released",
+            )
+        if "legacy-delay:XLTCZEUR" in replacement_scheduler.job_ids:
+            newer_replacement_started.set()
+
+    _control_replacement_scheduler_start(monkeypatch, on_start)
+
+    older_reload = _ThreadRun(lambda: service.reload(older_config))
+    try:
+        _wait_for(
+            older_replacement_started,
+            "older reload did not reach replacement start",
+        )
+        newer_reload = _ThreadRun(lambda: service.reload(newer_config))
+        if newer_replacement_started.wait(timeout=2.0):
+            newer_reload.wait_finished()
+
+        release_older_replacement.set()
+        older_reload.wait_finished()
+        newer_reload.wait_finished()
+        status = service.status()
+    finally:
+        release_older_replacement.set()
+        if not older_reload.finished.is_set():
+            older_reload.wait_finished()
+        service.shutdown()
+
+    assert status["config_applied"] is True
+    assert status["saved_config_fingerprint"] == newer_fingerprint
+    assert status["active_config_fingerprint"] == newer_fingerprint
+    assert status["reload_error"] is None
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XLTCZEUR"}
+
+
+def test_restart_waits_for_in_progress_reload_before_loading_file_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    file_config = _config([_pair("XETHZEUR", delay=1)])
+    stale_reload_config = _config([_pair("XXBTZEUR", delay=1)])
+    file_fingerprint = fingerprint_config(file_config, {})
+    service = _started_service(tmp_path, file_config)
+    reload_replacement_started = threading.Event()
+    release_reload_replacement = threading.Event()
+
+    def on_start(replacement_scheduler) -> None:
+        if "legacy-delay:XXBTZEUR" in replacement_scheduler.job_ids:
+            reload_replacement_started.set()
+            _wait_for(
+                release_reload_replacement,
+                "reload replacement was not released",
+            )
+
+    _control_replacement_scheduler_start(monkeypatch, on_start)
+
+    reload_run = _ThreadRun(lambda: service.reload(stale_reload_config))
+    try:
+        _wait_for(
+            reload_replacement_started,
+            "reload did not reach replacement start",
+        )
+        restart_run = _ThreadRun(lambda: (service.shutdown(), service.start()))
+        restart_completed_before_reload = restart_run.finished.wait(timeout=2.0)
+
+        release_reload_replacement.set()
+        reload_run.wait_finished()
+        restart_run.wait_finished()
+        status = service.status()
+    finally:
+        release_reload_replacement.set()
+        if not reload_run.finished.is_set():
+            reload_run.wait_finished()
+        service.shutdown()
+
+    assert restart_completed_before_reload is False
+    assert status["running"] is True
+    assert status["config_applied"] is True
+    assert status["saved_config_fingerprint"] == file_fingerprint
+    assert status["active_config_fingerprint"] == file_fingerprint
+    assert status["reload_error"] is None
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
 
 
 def test_reload_runtime_failure_preserves_previous_active_jobs_when_restore_succeeds(
@@ -892,29 +1053,53 @@ def test_replacement_scheduled_job_callback_uses_new_config_before_swap(
     assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 2
 
 
-def test_reload_does_not_publish_replacement_after_shutdown_interleaves(
+def test_shutdown_waits_for_in_progress_reload_before_stopping_scheduler(
     tmp_path,
     monkeypatch,
 ) -> None:
     old_config = _config([_pair("XETHZEUR", delay=1)])
     new_config = _config([_pair("XXBTZEUR", delay=1)])
-    old_fingerprint = fingerprint_config(old_config, {})
     new_fingerprint = fingerprint_config(new_config, {})
     service = _started_service(tmp_path, old_config)
+    reload_replacement_started = threading.Event()
+    release_reload_replacement = threading.Event()
 
-    def on_start(_replacement_scheduler) -> None:
+    def on_start(replacement_scheduler) -> None:
+        if "legacy-delay:XXBTZEUR" in replacement_scheduler.job_ids:
+            reload_replacement_started.set()
+            _wait_for(
+                release_reload_replacement,
+                "reload replacement was not released",
+            )
+
+    _control_replacement_scheduler_start(monkeypatch, on_start)
+
+    reload_run = _ThreadRun(lambda: service.reload(new_config))
+    try:
+        _wait_for(
+            reload_replacement_started,
+            "reload did not reach replacement start",
+        )
+        shutdown_run = _ThreadRun(service.shutdown)
+        shutdown_completed_before_reload = shutdown_run.finished.wait(timeout=2.0)
+
+        release_reload_replacement.set()
+        reload_run.wait_finished()
+        shutdown_run.wait_finished()
+        status = service.status()
+    finally:
+        release_reload_replacement.set()
+        if not reload_run.finished.is_set():
+            reload_run.wait_finished()
         service.shutdown()
 
-    _observe_replacement_scheduler_start(monkeypatch, on_start)
-
-    status = service.reload(new_config)
-
+    assert shutdown_completed_before_reload is False
     assert status["running"] is False
-    assert status["config_applied"] is False
+    assert status["config_applied"] is True
     assert status["saved_config_fingerprint"] == new_fingerprint
-    assert status["active_config_fingerprint"] == old_fingerprint
-    assert "shutdown" in status["reload_error"]
-    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+    assert status["active_config_fingerprint"] == new_fingerprint
+    assert status["reload_error"] is None
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XXBTZEUR"}
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
