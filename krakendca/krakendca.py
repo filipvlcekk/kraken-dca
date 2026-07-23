@@ -72,4 +72,6 @@ class KrakenDCA:
         logger.info(f"DCA ({n_dca} {pair}):")
         for dca in self.dcas_list:
             logger.info(dca)
-            dca.handle_dca_logic()
+            outcome = dca.handle_dca_logic()
+            if getattr(outcome, "status", None) == "failed":
+                raise ValueError(outcome.message)

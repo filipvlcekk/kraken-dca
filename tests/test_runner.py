@@ -277,6 +277,24 @@ def test_kraken_exception_returns_failed_kraken_error():
     assert "network down" in result.message
 
 
+def test_dca_value_error_returns_failed_domain_error(monkeypatch):
+    class FakeDCA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_dca_logic(self):
+            raise ValueError("Too low volume to buy XETH")
+
+    monkeypatch.setattr("krakendca.runner.DCA", FakeDCA)
+
+    result = run_pair(legacy_config(), "XETHZEUR", FakeKrakenApi())
+
+    assert result.status == "failed"
+    assert result.reason == "domain_error"
+    assert result.order_txid is None
+    assert "Too low volume to buy XETH" in result.message
+
+
 def test_run_pair_fetches_asset_pairs_once_and_builds_pair(monkeypatch):
     asset_pairs = {"asset-pairs": {"sentinel": True}}
     ka = FakeKrakenApi(asset_pairs=asset_pairs)

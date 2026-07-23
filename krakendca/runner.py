@@ -58,7 +58,17 @@ def run_pair(config: dict, pair_name: str, ka: KrakenApi) -> RunResult:
         pair = Pair.get_pair_from_kraken(ka, asset_pairs, pair_name)
         dca = _build_dca(ka, config, pair_config, pair)
         outcome = dca.handle_dca_logic()
-    except Exception as exc:
+    except ValueError as exc:
+        logger.warning("DCA run domain error for %s: %s", pair_name, exc)
+        return _result(
+            pair_name,
+            "failed",
+            "domain_error",
+            started_at,
+            None,
+            str(exc),
+        )
+    except (ConnectionError, OSError, TimeoutError) as exc:
         logger.exception("DCA run failed for %s.", pair_name)
         return _result(
             pair_name,

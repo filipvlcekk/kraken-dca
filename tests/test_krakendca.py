@@ -1,4 +1,7 @@
 """krakendca.py tests module."""
+from types import SimpleNamespace
+
+import pytest
 import vcr
 from freezegun import freeze_time
 from krakenapi import KrakenApi
@@ -6,6 +9,21 @@ from krakenapi import KrakenApi
 from krakendca.config import Config
 from krakendca.dca import DCA
 from krakendca.krakendca import KrakenDCA
+
+
+class FakeDCA:
+    """Fake DCA object for handle_pairs_dca outcome tests."""
+
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.calls = 0
+
+    def __str__(self) -> str:
+        return "Fake DCA"
+
+    def handle_dca_logic(self):
+        self.calls += 1
+        return self.outcome
 
 
 class TestKrakenDCA:
@@ -127,3 +145,29 @@ class TestKrakenDCA:
         self.kdca.handle_pairs_dca()
         captured = logging_capture.read()
         assert "Factor adjusted limit price (0.9850): 2797.99." in captured
+
+
+def test_handle_pairs_dca_raises_failed_outcome_not_skipped() -> None:
+    skipped_dca = FakeDCA(
+        SimpleNamespace(
+            status="skipped",
+            reason="duplicate_order",
+            message="duplicate order",
+        )
+    )
+    failed_dca = FakeDCA(
+        SimpleNamespace(
+            status="failed",
+            reason="insufficient_funds",
+            message="Insufficient funds",
+        )
+    )
+    kdca = KrakenDCA(config=None, ka=None)
+    kdca.dcas_list = [skipped_dca, failed_dca]
+
+    with pytest.raises(ValueError) as e_info:
+        kdca.handle_pairs_dca()
+
+    assert "Insufficient funds" in str(e_info.value)
+    assert skipped_dca.calls == 1
+    assert failed_dca.calls == 1
