@@ -275,3 +275,79 @@ class TestConfig:
             == f"{CONFIG_ERROR_MSG}: "
             "Please provide your Kraken API public key."
         )
+
+    def test_cli_rejects_enabled_cron_scheduled_pairs(self) -> None:
+        """Test CLI rejects cron-managed pairs with a web-mode error."""
+        e_info = mock_config_error(
+            """
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+dca_pairs:
+  - pair: "XETHZEUR"
+    amount: 15
+    delay: 1
+    schedule:
+      enabled: true
+      cron: "0 9 * * *"
+      timezone: "UTC"
+""",
+            ValueError,
+        )
+        assert "Cron schedules require web mode." in e_info
+
+    def test_cli_skips_disabled_scheduled_pairs(self) -> None:
+        """Test CLI ignores schedule-disabled pairs."""
+        config = mock_config(
+            """
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+dca_pairs:
+  - pair: "XETHZEUR"
+    amount: 15
+    schedule:
+      enabled: false
+  - pair: "XXBTZEUR"
+    delay: 3
+    amount: 20
+"""
+        )
+        assert len(config.dca_pairs) == 1
+        assert config.dca_pairs[0]["pair"] == "XXBTZEUR"
+
+    def test_cli_treats_disabled_schedule_as_disabled_with_delay(self) -> None:
+        """Test disabled schedules override legacy delay for CLI execution."""
+        config = mock_config(
+            """
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+dca_pairs:
+  - pair: "XETHZEUR"
+    amount: 15
+    delay: 1
+    schedule:
+      enabled: false
+"""
+        )
+        assert config.dca_pairs == []
+
+    def test_cli_uses_enabled_schedule_over_delay(self) -> None:
+        """Test enabled schedules reject CLI execution even when delay exists."""
+        e_info = mock_config_error(
+            """
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+dca_pairs:
+  - pair: "XETHZEUR"
+    amount: 15
+    delay: 1
+    schedule:
+      cron: "0 9 * * *"
+      timezone: "UTC"
+""",
+            ValueError,
+        )
+        assert "Cron schedules require web mode." in e_info

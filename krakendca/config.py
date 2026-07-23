@@ -1,7 +1,12 @@
 """Configuration module."""
 import os
 
-import yaml
+from krakendca.config_store import (
+    ConfigValidationError,
+    get_cli_dca_pairs,
+    load_config,
+    validate_config,
+)
 from yaml.scanner import ScannerError
 
 CONFIG_ERROR_MSG: str = "Configuration file incorrectly formatted"
@@ -24,8 +29,7 @@ class Config:
         :return: None
         """
         try:
-            with open(config_file, "r") as stream:
-                config = yaml.load(stream, Loader=yaml.SafeLoader) or {}
+            config = validate_config(load_config(config_file))
             api_config = config.get("api") or {}
             self.api_public_key = api_config.get("public_key")
             if self.api_public_key is None:
@@ -33,90 +37,10 @@ class Config:
             self.api_private_key = api_config.get("private_key")
             if self.api_private_key is None:
                 self.api_private_key = os.getenv("KRAKEN_API_PRIVATE_KEY")
-            self.dca_pairs = config.get("dca_pairs")
-            self.__check_configuration()
-            for dca_pair in self.dca_pairs:
-                self.__check_dca_pair_configuration(dca_pair)
+            self.dca_pairs = get_cli_dca_pairs(config)
         except EnvironmentError:
             raise FileNotFoundError("Configuration file not found.")
         except ScannerError as e:
             raise ScannerError(CONFIG_ERROR_MSG + f": {e}")
-
-    def __check_configuration(self) -> None:
-        """
-        Check Config attributes and raise an error in case of missing
-        parameters in configuration file.
-        :return: None
-        """
-        try:
-            if not self.api_public_key:
-                raise ValueError("Please provide your Kraken API public key.")
-            if not self.api_private_key:
-                raise ValueError("Please provide your Kraken API private key.")
-            if not self.dca_pairs or type(self.dca_pairs) is not list:
-                raise ValueError("No DCA pairs specified.")
-        except ValueError as e:
-            raise ValueError(CONFIG_ERROR_MSG + f": {e}")
-
-    @staticmethod
-    def __check_dca_pair_configuration(dca_pair: dict) -> None:
-        """
-        Check DCA pair configuration parameters are currently specified.
-
-        :param dca_pair: Dictionary with pair to DCA, and associated
-        parameters.
-        :return: None
-        """
-        try:
-            # pair
-            if not dca_pair.get("pair"):
-                raise ValueError(
-                    "Please provide the pair to dollar cost average."
-                )
-
-            # delay
-            delay: int = dca_pair.get("delay")
-            if not delay or type(delay) is not int or delay <= 0:
-                raise ValueError(
-                    "Please set the DCA days delay as a number > 0."
-                )
-            try:
-                dca_pair["amount"]: float = float(dca_pair.get("amount"))
-            except TypeError:
-                raise ValueError("Please provide an amount > 0 to DCA.")
-
-            # amount
-            amount: float = dca_pair.get("amount")
-            if not amount or type(amount) is not float or amount <= 0:
-                raise ValueError("Please provide an amount > 0 to DCA.")
-
-            # limit_factor
-            if dca_pair.get("limit_factor"):
-                try:
-                    limit_factor: float = float(dca_pair.get("limit_factor"))
-                    if len(str(limit_factor).split(".")[1]) > 5:
-                        raise ValueError
-                    dca_pair["limit_factor"]: float = limit_factor
-                except ValueError:
-                    raise ValueError(
-                        "limit_factor option must be a number "
-                        "up to 5 digits."
-                    )
-
-            # max_price
-            if dca_pair.get("max_price"):
-                try:
-                    max_price: float = float(dca_pair.get("max_price"))
-                    dca_pair["max_price"]: float = max_price
-                except ValueError:
-                    raise ValueError("max_price must be a number.")
-
-            if dca_pair.get("ignore_differing_orders"):
-                if not isinstance(
-                    dca_pair.get("ignore_differing_orders"), bool
-                ):
-                    raise ValueError(
-                        "ignore_differing_orders must be a boolean."
-                    )
-        except ValueError as e:
+        except ConfigValidationError as e:
             raise ValueError(CONFIG_ERROR_MSG + f": {e}")
