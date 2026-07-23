@@ -161,6 +161,30 @@ def test_valid_config_starts_scheduler_and_returns_redacted_config(
     assert FakeSchedulerService.instances[0].started is True
 
 
+def test_env_credentials_are_redacted_as_null_with_env_secret_source(
+    authed_client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("KRAKEN_API_PUBLIC_KEY", "ENV_PUBLIC")
+    monkeypatch.setenv("KRAKEN_API_PRIVATE_KEY", "ENV_PRIVATE")
+    config = valid_config()
+    config.pop("api")
+    client, _path, _csrf = authed_client(config)
+
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["config"]["api"] == {
+        "public_key": None,
+        "private_key": None,
+    }
+    assert data["secrets"] == {
+        "public_key": {"configured": True, "source": "env"},
+        "private_key": {"configured": True, "source": "env"},
+    }
+
+
 def test_missing_config_enters_setup_mode(authed_client) -> None:
     client, _path, _csrf = authed_client()
 
@@ -171,8 +195,11 @@ def test_missing_config_enters_setup_mode(authed_client) -> None:
     assert config_response.json()["data"]["config_valid"] is False
     assert "config" in config_response.json()["data"]["validation_errors"]
     assert scheduler_response.status_code == 200
-    assert scheduler_response.json()["data"]["running"] is False
-    assert scheduler_response.json()["data"]["jobs"] == []
+    scheduler = scheduler_response.json()["data"]
+    assert scheduler["running"] is False
+    assert scheduler["jobs"] == []
+    assert _scheduler_contract_keys().issubset(scheduler)
+    assert scheduler["last_reload_at"] is None
     assert FakeSchedulerService.instances == []
 
 
@@ -217,7 +244,9 @@ def test_put_config_requires_valid_csrf(authed_client) -> None:
     assert response.json()["error"]["code"] == "csrf_invalid"
 
 
-def test_put_config_saves_and_reloads_scheduler(authed_client) -> None:
+def test_put_config_saves_and_returns_required_scheduler_contract(
+    authed_client,
+) -> None:
     client, path, csrf = authed_client(valid_config())
     submitted = valid_config("XXBTZEUR")
 
@@ -231,7 +260,9 @@ def test_put_config_saves_and_reloads_scheduler(authed_client) -> None:
     body = response.json()
     assert body["ok"] is True
     assert body["data"]["config"]["dca_pairs"][0]["pair"] == "XXBTZEUR"
-    assert body["data"]["scheduler_status"]["running"] is True
+    assert "scheduler_status" not in body["data"]
+    assert body["data"]["scheduler"]["running"] is True
+    assert _scheduler_contract_keys().issubset(body["data"]["scheduler"])
     with open(path, encoding="utf-8") as saved_file:
         saved = yaml.safe_load(saved_file)
     assert saved["dca_pairs"][0]["pair"] == "XXBTZEUR"
@@ -283,33 +314,121 @@ def test_reload_reads_saved_config_not_client_payload(authed_client) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["config_applied"] is True
+    data = response.json()["data"]
+    assert set(data) == {"scheduler"}
+    assert data["scheduler"]["config_applied"] is True
+    assert _scheduler_contract_keys().issubset(data["scheduler"])
     assert FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
         "pair"
     ] == "XETHZEUR"
 
 
-def test_manual_run_maps_completed_and_conflict_results(authed_client) -> None:
+def test_scheduler_status_returns_required_contract_for_active_scheduler(
+    authed_client,
+) -> None:
+    client, _path, _csrf = authed_client(valid_config())
+
+    response = client.get("/api/scheduler")
+
+    assert response.status_code == 200
+    scheduler = response.json()["data"]
+    assert _scheduler_contract_keys().issubset(scheduler)
+    assert scheduler["running"] is True
+    assert scheduler["config_applied"] is True
+    assert scheduler["last_reload_at"] is None
+
+
+def test_manual_run_completed_success_returns_result_fields_at_data_top_level(
+    authed_client,
+) -> None:
     client, _path, csrf = authed_client(valid_config())
 
-    completed = client.post(
+    response = client.post(
         "/api/pairs/XETHZEUR/run",
         headers={"X-CSRF-Token": csrf},
     )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert "result" not in data
+    assert data == {
+        "pair": "XETHZEUR",
+        "status": "completed",
+        "reason": None,
+        "started_at": "2026-07-22T09:00:00+00:00",
+        "finished_at": "2026-07-22T09:00:00+00:00",
+        "order_txid": "TXID",
+        "message": "message",
+    }
+
+
+def test_manual_run_maps_conflict_result_to_409(authed_client) -> None:
     FakeSchedulerService.run_result = run_result(
         "XETHZEUR",
         "failed",
         reason="conflict",
     )
-    conflict = client.post(
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.post(
         "/api/pairs/XETHZEUR/run",
         headers={"X-CSRF-Token": csrf},
     )
 
-    assert completed.status_code == 200
-    assert completed.json()["data"]["result"]["status"] == "completed"
-    assert conflict.status_code == 409
-    assert conflict.json()["error"]["code"] == "conflict"
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "conflict"
+
+
+@pytest.mark.parametrize(
+    ("status", "reason", "expected_status", "expected_code"),
+    [
+        ("skipped", "min_order_interval", 200, None),
+        ("failed", "config_not_applied", 409, "config_not_applied"),
+        ("failed", "domain_error", 400, "domain_error"),
+        ("failed", "domain", 400, "domain"),
+        ("failed", "insufficient_funds", 400, "insufficient_funds"),
+        ("failed", "network_error", 502, "network_error"),
+        ("failed", "history_unwritable", 500, "history_unwritable"),
+        (
+            "failed",
+            "history_persistence_failed",
+            500,
+            "history_persistence_failed",
+        ),
+        ("failed", "unexpected", 500, "unexpected"),
+        ("failed", None, 500, "failed"),
+    ],
+)
+def test_manual_run_result_status_mapping(
+    authed_client,
+    status,
+    reason,
+    expected_status,
+    expected_code,
+) -> None:
+    FakeSchedulerService.run_result = run_result(
+        "XETHZEUR",
+        status,
+        reason=reason,
+    )
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.post(
+        "/api/pairs/XETHZEUR/run",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == expected_status
+    body = response.json()
+    if expected_status == 200:
+        assert body["ok"] is True
+        assert body["data"]["pair"] == "XETHZEUR"
+        assert body["data"]["status"] == status
+        assert body["data"]["reason"] == reason
+    else:
+        assert body["ok"] is False
+        assert body["error"]["code"] == expected_code
+        assert body["error"]["details"]["result"]["pair"] == "XETHZEUR"
 
 
 def test_manual_run_maps_kraken_error_to_502(authed_client) -> None:
@@ -327,3 +446,15 @@ def test_manual_run_maps_kraken_error_to_502(authed_client) -> None:
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "kraken_error"
+
+
+def _scheduler_contract_keys() -> set[str]:
+    return {
+        "running",
+        "config_applied",
+        "saved_config_fingerprint",
+        "active_config_fingerprint",
+        "reload_error",
+        "last_reload_at",
+        "jobs",
+    }

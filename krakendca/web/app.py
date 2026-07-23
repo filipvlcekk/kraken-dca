@@ -60,6 +60,19 @@ def create_app(
     app.include_router(config_router)
     app.include_router(scheduler_router)
 
+    @app.middleware("http")
+    async def refresh_authenticated_session(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path != "/api/session":
+            session = getattr(request.state, "authenticated_session", None)
+            if session is not None:
+                auth.set_session_cookie(
+                    request,
+                    response,
+                    str(session["csrf_token"]),
+                )
+        return response
+
     @app.api_route(
         "/api/{path:path}",
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

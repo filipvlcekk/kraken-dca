@@ -20,7 +20,7 @@ async def login(request: Request):
 
     csrf_token = auth.new_csrf_token()
     response = ok({"authenticated": True, "csrf_token": csrf_token})
-    _set_session_cookie(request, response, csrf_token)
+    auth.set_session_cookie(request, response, csrf_token)
     return response
 
 
@@ -32,7 +32,7 @@ async def current_session(request: Request):
 
     csrf_token = auth.new_csrf_token()
     response = ok({"authenticated": True, "csrf_token": csrf_token})
-    _set_session_cookie(request, response, csrf_token)
+    auth.set_session_cookie(request, response, csrf_token)
     return response
 
 
@@ -47,19 +47,3 @@ async def logout(request: Request):
         secure=request.app.state.cookie_secure,
     )
     return response
-
-
-def _set_session_cookie(
-    request: Request,
-    response,
-    csrf_token: str,
-) -> None:
-    cookie = auth.encode_session(request.app.state.session_serializer, csrf_token)
-    response.set_cookie(
-        auth.COOKIE_NAME,
-        cookie,
-        max_age=auth.SESSION_MAX_AGE_SECONDS,
-        httponly=True,
-        samesite="strict",
-        secure=request.app.state.cookie_secure,
-    )

@@ -7,7 +7,12 @@ from yaml import YAMLError
 
 from krakendca import config_store
 from krakendca.web import auth
-from krakendca.web.schemas import ApiException, ok, serialize_run_result
+from krakendca.web.schemas import (
+    ApiException,
+    ok,
+    serialize_run_result,
+    serialize_scheduler_status,
+)
 
 router = APIRouter(tags=["scheduler"])
 
@@ -17,8 +22,8 @@ async def get_scheduler(request: Request):
     auth.require_authenticated_session(request)
     scheduler = request.app.state.scheduler
     if scheduler is None:
-        return ok(_inactive_status())
-    return ok(scheduler.status())
+        return ok(serialize_scheduler_status(None))
+    return ok(serialize_scheduler_status(scheduler.status()))
 
 
 @router.post("/api/scheduler/reload")
@@ -58,7 +63,7 @@ async def reload_scheduler(request: Request):
             str(exc),
         ) from exc
     request.app.state.config_response = request.app.state.build_config_response()
-    return ok(status)
+    return ok({"scheduler": serialize_scheduler_status(status)})
 
 
 @router.post("/api/pairs/{pair}/run")
@@ -78,7 +83,7 @@ async def run_pair(pair: str, request: Request):
         raise ApiException(500, "scheduler_error", str(exc)) from exc
     serialized = serialize_run_result(result)
     if result.status in {"completed", "skipped", "success"}:
-        return ok({"result": serialized})
+        return ok(serialized)
 
     reason = result.reason or result.status or "run_failed"
     raise ApiException(
@@ -88,23 +93,11 @@ async def run_pair(pair: str, request: Request):
         details={"result": serialized},
     )
 
-
-def _inactive_status() -> dict:
-    return {
-        "running": False,
-        "config_applied": False,
-        "saved_config_fingerprint": None,
-        "active_config_fingerprint": None,
-        "reload_error": None,
-        "last_reload_at": None,
-        "jobs": [],
-    }
-
-
 def _status_for_reason(reason: str) -> int:
     if reason in {"conflict", "config_not_applied"}:
         return 409
     if reason in {
+        "domain",
         "domain_error",
         "insufficient_funds",
         "pair_not_found",

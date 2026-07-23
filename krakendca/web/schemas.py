@@ -59,7 +59,34 @@ def serialize_run_result(result: Any) -> dict[str, Any]:
     }
 
 
+def serialize_scheduler_status(status: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = {
+        "running": False,
+        "config_applied": False,
+        "saved_config_fingerprint": None,
+        "active_config_fingerprint": None,
+        "reload_error": None,
+        "last_reload_at": None,
+        "jobs": [],
+    }
+    if status:
+        normalized.update(status)
+    if normalized["jobs"] is None:
+        normalized["jobs"] = []
+    return _serialize_value(normalized)
+
+
 def _serialize_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
+
+
+def _serialize_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_serialize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_value(item) for key, item in value.items()}
+    return value

@@ -7,7 +7,7 @@ from yaml import YAMLError
 
 from krakendca import config_store
 from krakendca.web import auth
-from krakendca.web.schemas import ApiException, ok
+from krakendca.web.schemas import ApiException, ok, serialize_scheduler_status
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -67,6 +67,6 @@ async def put_config(request: Request):
             "secrets": redacted["secrets"],
             "config_valid": True,
             "validation_errors": {},
-            "scheduler_status": scheduler_status,
+            "scheduler": serialize_scheduler_status(scheduler_status),
         }
     )

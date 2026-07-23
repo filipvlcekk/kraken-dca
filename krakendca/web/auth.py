@@ -8,6 +8,7 @@ from hmac import compare_digest
 from typing import Any, Mapping
 
 from fastapi import Request
+from fastapi.responses import Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from krakendca.web.schemas import ApiException
@@ -67,6 +68,7 @@ def decode_session(request: Request) -> dict[str, Any] | None:
 
     if not payload.get("authenticated") or not payload.get("csrf_token"):
         return None
+    request.state.authenticated_session = payload
     return payload
 
 
@@ -92,3 +94,19 @@ def require_csrf(request: Request) -> dict[str, Any]:
             "Missing or invalid CSRF token.",
         )
     return session
+
+
+def set_session_cookie(
+    request: Request,
+    response: Response,
+    csrf_token: str,
+) -> None:
+    cookie = encode_session(request.app.state.session_serializer, csrf_token)
+    response.set_cookie(
+        COOKIE_NAME,
+        cookie,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="strict",
+        secure=request.app.state.cookie_secure,
+    )
