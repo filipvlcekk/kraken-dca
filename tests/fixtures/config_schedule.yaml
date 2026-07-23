@@ -1,0 +1,19 @@
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+
+dca_pairs:
+  - pair: "XETHZEUR"
+    amount: 15
+    schedule:
+      enabled: true
+      cron: "0 9 * * *"
+      timezone: "Europe/Prague"
+    min_order_interval_minutes: 30
+    limit_factor: 0.985
+    max_price: 2900.10
+  - pair: "XXBTZEUR"
+    amount: 20
+    schedule:
+      enabled: false
+    delay: 3
