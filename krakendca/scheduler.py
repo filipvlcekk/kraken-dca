@@ -87,9 +87,11 @@ class SchedulerService:
 
     def shutdown(self) -> None:
         """Stop APScheduler if it is running."""
+        with self._state_lock:
+            self._shutdown_requested = True
+
         with self._lifecycle_lock:
             with self._state_lock:
-                self._shutdown_requested = True
                 scheduler = self._scheduler
                 running = scheduler.running
             if running:
@@ -114,6 +116,41 @@ class SchedulerService:
                     raise _ReloadAborted("shutdown requested during scheduler reload")
                 if active_scheduler_running:
                     replacement_scheduler.start()
+
+                old_scheduler = None
+                with self._state_lock:
+                    if self._shutdown_requested:
+                        raise _ReloadAborted(
+                            "shutdown requested during scheduler reload"
+                        )
+                    old_scheduler = self._scheduler
+
+                if old_scheduler is not None and old_scheduler.running:
+                    old_scheduler.shutdown(wait=True)
+
+                with self._state_lock:
+                    if self._shutdown_requested:
+                        raise _ReloadAborted(
+                            "shutdown requested during scheduler reload"
+                        )
+                    self.saved_config_fingerprint = saved_fingerprint
+                    self.last_reload_at = last_reload_at
+                    self._scheduler = replacement_scheduler
+                    self._active_config = normalized
+                    self._job_specs = {spec.id: spec for spec in specs}
+                    self.active_config_fingerprint = saved_fingerprint
+                    self.reload_error = None
+            except _ReloadAborted as exc:
+                if (
+                    replacement_scheduler is not None
+                    and replacement_scheduler.running
+                ):
+                    replacement_scheduler.shutdown(wait=True)
+                with self._state_lock:
+                    self.saved_config_fingerprint = saved_fingerprint
+                    self.last_reload_at = last_reload_at
+                    self.reload_error = str(exc)
+                return self.status()
             except Exception as exc:
                 if (
                     replacement_scheduler is not None
@@ -127,31 +164,6 @@ class SchedulerService:
                 logger.exception("Scheduler reload failed.")
                 return self.status()
 
-            old_scheduler = None
-            abort_started_replacement = False
-            with self._state_lock:
-                if self._shutdown_requested:
-                    self.saved_config_fingerprint = saved_fingerprint
-                    self.last_reload_at = last_reload_at
-                    self.reload_error = "shutdown requested during scheduler reload"
-                    abort_started_replacement = True
-                else:
-                    old_scheduler = self._scheduler
-                    self.saved_config_fingerprint = saved_fingerprint
-                    self.last_reload_at = last_reload_at
-                    self._scheduler = replacement_scheduler
-                    self._active_config = normalized
-                    self._job_specs = {spec.id: spec for spec in specs}
-                    self.active_config_fingerprint = saved_fingerprint
-                    self.reload_error = None
-
-            if abort_started_replacement:
-                if replacement_scheduler is not None and replacement_scheduler.running:
-                    replacement_scheduler.shutdown(wait=True)
-                return self.status()
-
-            if old_scheduler is not None and old_scheduler.running:
-                old_scheduler.shutdown(wait=True)
             return self.status()
 
     def status(self) -> dict:

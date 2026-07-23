@@ -127,6 +127,20 @@ def _wait_for(event: threading.Event, reason: str, timeout: float = 5.0) -> None
     assert event.wait(timeout), reason
 
 
+class _ObservableLock:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.acquire_attempted = threading.Event()
+
+    def __enter__(self):
+        self.acquire_attempted.set()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self._lock.release()
+
+
 def _fail_replacement_scheduler(
     monkeypatch,
     *,
@@ -189,15 +203,17 @@ def _observe_replacement_scheduler_start(monkeypatch, on_start) -> None:
     monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
 
 
-def _control_replacement_scheduler_start(monkeypatch, on_start) -> None:
+def _control_replacement_scheduler_start(monkeypatch, on_start) -> list[object]:
     import krakendca.scheduler as scheduler_module
 
     original_scheduler = scheduler_module.BackgroundScheduler
+    created = []
 
     class ControlledScheduler:
         def __init__(self, *args, **kwargs) -> None:
             self._scheduler = original_scheduler(*args, **kwargs)
             self.job_ids: set[str] = set()
+            created.append(self)
 
         @property
         def running(self) -> bool:
@@ -217,6 +233,7 @@ def _control_replacement_scheduler_start(monkeypatch, on_start) -> None:
             return getattr(self._scheduler, name)
 
     monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
+    return created
 
 
 def test_start_sets_running_true_and_matching_fingerprints(tmp_path) -> None:
@@ -365,6 +382,8 @@ def test_overlapping_reloads_cannot_publish_older_replacement_after_newer(
     newer_config = _config([_pair("XLTCZEUR", delay=1)])
     newer_fingerprint = fingerprint_config(newer_config, {})
     service = _started_service(tmp_path, initial_config)
+    lifecycle_lock = _ObservableLock()
+    service._lifecycle_lock = lifecycle_lock
     older_replacement_started = threading.Event()
     newer_replacement_started = threading.Event()
     release_older_replacement = threading.Event()
@@ -387,9 +406,13 @@ def test_overlapping_reloads_cannot_publish_older_replacement_after_newer(
             older_replacement_started,
             "older reload did not reach replacement start",
         )
+        lifecycle_lock.acquire_attempted.clear()
         newer_reload = _ThreadRun(lambda: service.reload(newer_config))
-        if newer_replacement_started.wait(timeout=2.0):
-            newer_reload.wait_finished()
+        _wait_for(
+            lifecycle_lock.acquire_attempted,
+            "newer reload did not wait for lifecycle lock",
+        )
+        assert newer_replacement_started.is_set() is False
 
         release_older_replacement.set()
         older_reload.wait_finished()
@@ -416,6 +439,8 @@ def test_restart_waits_for_in_progress_reload_before_loading_file_config(
     stale_reload_config = _config([_pair("XXBTZEUR", delay=1)])
     file_fingerprint = fingerprint_config(file_config, {})
     service = _started_service(tmp_path, file_config)
+    lifecycle_lock = _ObservableLock()
+    service._lifecycle_lock = lifecycle_lock
     reload_replacement_started = threading.Event()
     release_reload_replacement = threading.Event()
 
@@ -435,8 +460,13 @@ def test_restart_waits_for_in_progress_reload_before_loading_file_config(
             reload_replacement_started,
             "reload did not reach replacement start",
         )
+        lifecycle_lock.acquire_attempted.clear()
         restart_run = _ThreadRun(lambda: (service.shutdown(), service.start()))
-        restart_completed_before_reload = restart_run.finished.wait(timeout=2.0)
+        _wait_for(
+            lifecycle_lock.acquire_attempted,
+            "restart did not wait for lifecycle lock",
+        )
+        assert restart_run.finished.is_set() is False
 
         release_reload_replacement.set()
         reload_run.wait_finished()
@@ -448,7 +478,6 @@ def test_restart_waits_for_in_progress_reload_before_loading_file_config(
             reload_run.wait_finished()
         service.shutdown()
 
-    assert restart_completed_before_reload is False
     assert status["running"] is True
     assert status["config_applied"] is True
     assert status["saved_config_fingerprint"] == file_fingerprint
@@ -1053,16 +1082,20 @@ def test_replacement_scheduled_job_callback_uses_new_config_before_swap(
     assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 2
 
 
-def test_shutdown_waits_for_in_progress_reload_before_stopping_scheduler(
+def test_shutdown_intent_aborts_reload_blocked_in_replacement_start(
     tmp_path,
     monkeypatch,
 ) -> None:
     old_config = _config([_pair("XETHZEUR", delay=1)])
     new_config = _config([_pair("XXBTZEUR", delay=1)])
+    old_fingerprint = fingerprint_config(old_config, {})
     new_fingerprint = fingerprint_config(new_config, {})
     service = _started_service(tmp_path, old_config)
+    lifecycle_lock = _ObservableLock()
+    service._lifecycle_lock = lifecycle_lock
     reload_replacement_started = threading.Event()
     release_reload_replacement = threading.Event()
+    shutdown_run = None
 
     def on_start(replacement_scheduler) -> None:
         if "legacy-delay:XXBTZEUR" in replacement_scheduler.job_ids:
@@ -1080,8 +1113,13 @@ def test_shutdown_waits_for_in_progress_reload_before_stopping_scheduler(
             reload_replacement_started,
             "reload did not reach replacement start",
         )
+        lifecycle_lock.acquire_attempted.clear()
         shutdown_run = _ThreadRun(service.shutdown)
-        shutdown_completed_before_reload = shutdown_run.finished.wait(timeout=2.0)
+        _wait_for(
+            lifecycle_lock.acquire_attempted,
+            "shutdown did not wait for lifecycle lock",
+        )
+        assert service._shutdown_requested is True
 
         release_reload_replacement.set()
         reload_run.wait_finished()
@@ -1091,15 +1129,78 @@ def test_shutdown_waits_for_in_progress_reload_before_stopping_scheduler(
         release_reload_replacement.set()
         if not reload_run.finished.is_set():
             reload_run.wait_finished()
-        service.shutdown()
+        if shutdown_run is not None and not shutdown_run.finished.is_set():
+            shutdown_run.wait_finished()
+        else:
+            service.shutdown()
 
-    assert shutdown_completed_before_reload is False
     assert status["running"] is False
-    assert status["config_applied"] is True
+    assert status["config_applied"] is False
     assert status["saved_config_fingerprint"] == new_fingerprint
-    assert status["active_config_fingerprint"] == new_fingerprint
-    assert status["reload_error"] is None
-    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XXBTZEUR"}
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert "shutdown requested during scheduler reload" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+
+
+def test_shutdown_intent_aborts_reload_blocked_in_old_scheduler_shutdown(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config([_pair("XETHZEUR", delay=1)])
+    new_config = _config([_pair("XXBTZEUR", delay=1)])
+    old_fingerprint = fingerprint_config(old_config, {})
+    new_fingerprint = fingerprint_config(new_config, {})
+    service = _started_service(tmp_path, old_config)
+    lifecycle_lock = _ObservableLock()
+    service._lifecycle_lock = lifecycle_lock
+    old_scheduler_shutdown_started = threading.Event()
+    release_old_scheduler_shutdown = threading.Event()
+    original_shutdown = service._scheduler.shutdown
+    shutdown_run = None
+
+    def shutdown_spy(*, wait: bool = True):
+        old_scheduler_shutdown_started.set()
+        _wait_for(
+            release_old_scheduler_shutdown,
+            "old scheduler shutdown was not released",
+        )
+        return original_shutdown(wait=wait)
+
+    monkeypatch.setattr(service._scheduler, "shutdown", shutdown_spy)
+
+    reload_run = _ThreadRun(lambda: service.reload(new_config))
+    try:
+        _wait_for(
+            old_scheduler_shutdown_started,
+            "reload did not reach old scheduler shutdown",
+        )
+        lifecycle_lock.acquire_attempted.clear()
+        shutdown_run = _ThreadRun(service.shutdown)
+        _wait_for(
+            lifecycle_lock.acquire_attempted,
+            "shutdown did not wait for lifecycle lock",
+        )
+        assert service._shutdown_requested is True
+
+        release_old_scheduler_shutdown.set()
+        reload_run.wait_finished()
+        shutdown_run.wait_finished()
+        status = service.status()
+    finally:
+        release_old_scheduler_shutdown.set()
+        if not reload_run.finished.is_set():
+            reload_run.wait_finished()
+        if shutdown_run is not None and not shutdown_run.finished.is_set():
+            shutdown_run.wait_finished()
+        else:
+            service.shutdown()
+
+    assert status["running"] is False
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] == new_fingerprint
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert "shutdown requested during scheduler reload" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
