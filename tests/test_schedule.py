@@ -99,6 +99,11 @@ def test_normalize_cron_day_of_week_rejects_invalid_steps(cron: str) -> None:
         normalize_cron_day_of_week(cron)
 
 
+def test_normalize_cron_day_of_week_rejects_invalid_sunday_alias_range_value() -> None:
+    with pytest.raises(ValueError):
+        normalize_cron_day_of_week("0 9 * * 0-8")
+
+
 def test_validate_schedule_accepts_sunday_alias_day_of_week_range() -> None:
     schedule = validate_schedule(
         {"enabled": True, "cron": "0 9 * * 6-7", "timezone": "UTC"}
@@ -113,6 +118,13 @@ def test_validate_schedule_accepts_stepped_sunday_alias_day_of_week_range() -> N
     )
 
     assert schedule["cron"] == "0 9 * * sun,tue,thu,sat"
+
+
+def test_validate_schedule_rejects_invalid_sunday_alias_range_value() -> None:
+    with pytest.raises(ValueError):
+        validate_schedule(
+            {"enabled": True, "cron": "0 9 * * 0-8", "timezone": "UTC"}
+        )
 
 
 def test_validate_schedule_treats_omitted_enabled_as_enabled() -> None:

@@ -193,6 +193,8 @@ def _expand_numeric_day_range(start: str, end: str, step: int = 1) -> list[str]:
     day_numbers = list(range(int(start), int(end) + 1, step))
     day_names = []
     for day_number in day_numbers:
+        if str(day_number) not in _DAY_NUMBERS:
+            raise ValueError("cron day of week must be between 0 and 7.")
         day_name = _DAY_NUMBERS[str(day_number)]
         if day_name not in day_names:
             day_names.append(day_name)
