@@ -48,7 +48,7 @@ class SchedulerService:
         self._env = env
         self._kraken_api_factory = kraken_api_factory or KrakenApi
         self._runner = runner or run_pair
-        self._scheduler = BackgroundScheduler(timezone="UTC")
+        self._scheduler = self._create_scheduler()
         self._state_lock = threading.RLock()
         self._pair_locks: dict[str, threading.Lock] = {}
         self._job_specs: dict[str, _JobSpec] = {}
@@ -66,7 +66,7 @@ class SchedulerService:
             normalized = config_store.validate_config(config, self._env)
             fingerprint = config_store.fingerprint_config(normalized, self._env)
             specs = self._build_job_specs(normalized)
-            self._add_specs_to_scheduler(specs)
+            self._add_specs_to_scheduler(self._scheduler, specs)
             self._active_config = normalized
             self._job_specs = {spec.id: spec for spec in specs}
             self.saved_config_fingerprint = fingerprint
@@ -78,31 +78,53 @@ class SchedulerService:
     def shutdown(self) -> None:
         """Stop APScheduler if it is running."""
         with self._state_lock:
-            if self._scheduler.running:
-                self._scheduler.shutdown(wait=True)
+            scheduler = self._scheduler
+            running = scheduler.running
+        if running:
+            scheduler.shutdown(wait=True)
 
     def reload(self, config: dict) -> dict:
         """Validate config and atomically replace active scheduler jobs."""
         normalized = config_store.validate_config(config, self._env)
         saved_fingerprint = config_store.fingerprint_config(normalized, self._env)
         last_reload_at = _utc_now_iso()
+        replacement_scheduler = None
 
+        try:
+            specs = self._build_job_specs(normalized)
+            replacement_scheduler = self._create_scheduler()
+            self._add_specs_to_scheduler(replacement_scheduler, specs)
+            with self._state_lock:
+                active_scheduler_running = self._scheduler.running
+            if active_scheduler_running:
+                replacement_scheduler.start()
+        except Exception as exc:
+            if (
+                replacement_scheduler is not None
+                and replacement_scheduler.running
+            ):
+                replacement_scheduler.shutdown(wait=True)
+            with self._state_lock:
+                self.saved_config_fingerprint = saved_fingerprint
+                self.last_reload_at = last_reload_at
+                self.reload_error = str(exc)
+            logger.exception("Scheduler reload failed.")
+            return self.status()
+
+        old_scheduler = None
         with self._state_lock:
+            old_scheduler = self._scheduler
             self.saved_config_fingerprint = saved_fingerprint
             self.last_reload_at = last_reload_at
-            try:
-                specs = self._build_job_specs(normalized)
-                self._replace_scheduler_jobs(specs)
-            except Exception as exc:
-                self.reload_error = str(exc)
-                logger.exception("Scheduler reload failed.")
-                return self.status()
-
+            self._scheduler = replacement_scheduler
             self._active_config = normalized
             self._job_specs = {spec.id: spec for spec in specs}
             self.active_config_fingerprint = saved_fingerprint
             self.reload_error = None
-            return self.status()
+
+        if old_scheduler is not None and old_scheduler.running:
+            old_scheduler.shutdown(wait=True)
+        return self.status()
 
     def status(self) -> dict:
         """Return scheduler state and public job metadata."""
@@ -125,14 +147,18 @@ class SchedulerService:
 
     def run_pair_now(self, pair: str) -> RunResult:
         """Run one pair immediately when config is applied and pair is idle."""
-        if self.saved_config_fingerprint != self.active_config_fingerprint:
+        with self._state_lock:
+            config_applied = self._config_applied()
+            active_config = self._active_config
+            lock = self._lock_for_pair(pair)
+
+        if not config_applied or active_config is None:
             return _failed_result(
                 pair,
                 "config_not_applied",
                 "Saved config has not been applied to the scheduler.",
             )
 
-        lock = self._lock_for_pair(pair)
         if not lock.acquire(blocking=False):
             return _failed_result(
                 pair,
@@ -141,7 +167,7 @@ class SchedulerService:
             )
 
         try:
-            return self._run_pair_with_active_config(pair)
+            return self._run_pair_with_config(pair, active_config)
         finally:
             lock.release()
 
@@ -167,9 +193,12 @@ class SchedulerService:
                 "Scheduler config has not been loaded.",
             )
 
-        public_key, private_key = self._effective_api_keys(active_config)
+        return self._run_pair_with_config(pair, active_config)
+
+    def _run_pair_with_config(self, pair: str, config: dict) -> RunResult:
+        public_key, private_key = self._effective_api_keys(config)
         kraken_api = self._kraken_api_factory(public_key, private_key)
-        return self._runner(active_config, pair, kraken_api)
+        return self._runner(config, pair, kraken_api)
 
     def _build_job_specs(self, config: dict) -> list[_JobSpec]:
         specs = []
@@ -213,26 +242,13 @@ class SchedulerService:
                 self._lock_for_pair(pair)
         return specs
 
-    def _replace_scheduler_jobs(self, specs: list[_JobSpec]) -> None:
-        previous_specs = list(self._job_specs.values())
-        self._scheduler.remove_all_jobs()
-        try:
-            self._add_specs_to_scheduler(specs)
-        except Exception as replace_exc:
-            self._scheduler.remove_all_jobs()
-            try:
-                self._add_specs_to_scheduler(previous_specs)
-            except Exception as restore_exc:
-                self._scheduler.remove_all_jobs()
-                self._job_specs = {}
-                raise RuntimeError(
-                    f"{replace_exc}; rollback failed: {restore_exc}"
-                ) from restore_exc
-            raise
-
-    def _add_specs_to_scheduler(self, specs: list[_JobSpec]) -> None:
+    def _add_specs_to_scheduler(
+        self,
+        scheduler: BackgroundScheduler,
+        specs: list[_JobSpec],
+    ) -> None:
         for spec in specs:
-            self._scheduler.add_job(
+            scheduler.add_job(
                 self._run_scheduled_pair,
                 trigger=spec.trigger,
                 args=[spec.pair],
@@ -281,9 +297,13 @@ class SchedulerService:
             return os.environ.get(key)
         return self._env.get(key)
 
+    def _create_scheduler(self) -> BackgroundScheduler:
+        return BackgroundScheduler(timezone="UTC")
+
     def _config_applied(self) -> bool:
         return (
-            self.saved_config_fingerprint is not None
+            self.reload_error is None
+            and self.saved_config_fingerprint is not None
             and self.active_config_fingerprint is not None
             and self.saved_config_fingerprint
             == self.active_config_fingerprint
