@@ -256,19 +256,18 @@ def _validate_pair(
     else:
         seen_pairs.add(pair_name)
 
-    if "delay" in dca_pair:
-        _validate_delay(dca_pair.get("delay"), index, fields)
-    elif "schedule" not in dca_pair:
-        fields[f"dca_pairs.{index}.delay"] = (
-            "Please set the DCA days delay as a number > 0."
-        )
-
     if "schedule" in dca_pair:
         _validate_pair_schedule(
             dca_pair.get("schedule"),
             index,
             normalized_pair,
             fields,
+        )
+    elif "delay" in dca_pair:
+        _validate_delay(dca_pair.get("delay"), index, fields)
+    else:
+        fields[f"dca_pairs.{index}.delay"] = (
+            "Please set the DCA days delay as a number > 0."
         )
 
     _validate_amount(dca_pair, index, normalized_pair, fields)

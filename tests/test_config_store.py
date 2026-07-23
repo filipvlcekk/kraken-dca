@@ -100,6 +100,40 @@ def test_disabled_schedule_takes_precedence_over_delay() -> None:
     assert get_cli_dca_pairs(normalized) == []
 
 
+def test_disabled_schedule_accepts_invalid_legacy_delay_as_metadata() -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["delay"] = "bad"
+    config["dca_pairs"][0]["schedule"] = {"enabled": False}
+
+    normalized = validate_config(config)
+
+    assert normalized["dca_pairs"][0]["delay"] == "bad"
+    assert normalized["dca_pairs"][0]["schedule"] == {"enabled": False}
+    assert get_cli_dca_pairs(normalized) == []
+
+
+def test_enabled_schedule_accepts_invalid_legacy_delay_as_metadata() -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["delay"] = "bad"
+    config["dca_pairs"][0]["schedule"] = {
+        "enabled": True,
+        "cron": "0 9 * * *",
+        "timezone": "UTC",
+    }
+
+    normalized = validate_config(config)
+
+    assert normalized["dca_pairs"][0]["delay"] == "bad"
+    assert normalized["dca_pairs"][0]["schedule"] == {
+        "enabled": True,
+        "cron": "0 9 * * *",
+        "timezone": "UTC",
+    }
+    with pytest.raises(ConfigValidationError) as exc_info:
+        get_cli_dca_pairs(normalized)
+    assert "Cron schedules require web mode." in str(exc_info.value)
+
+
 @pytest.mark.parametrize("minutes", [0, 525600])
 def test_min_order_interval_accepts_bounds(minutes: int) -> None:
     config = valid_config()
