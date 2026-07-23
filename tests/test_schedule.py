@@ -72,6 +72,10 @@ def test_validate_schedule_defaults_timezone_to_utc() -> None:
         ("0 9 * * 6", "0 9 * * sat"),
         ("0 9 * * 1,3,5", "0 9 * * mon,wed,fri"),
         ("0 9 * * 1-5", "0 9 * * mon-fri"),
+        ("0 9 * * 0-7", "0 9 * * sun,mon,tue,wed,thu,fri,sat"),
+        ("0 9 * * 0-6", "0 9 * * sun,mon,tue,wed,thu,fri,sat"),
+        ("0 9 * * 1-7", "0 9 * * mon,tue,wed,thu,fri,sat,sun"),
+        ("0 9 * * 6-7", "0 9 * * sat,sun"),
     ],
 )
 def test_normalize_cron_day_of_week_numeric_tokens(
@@ -85,6 +89,19 @@ def test_normalize_cron_day_of_week_accepts_weekday_names(day_name: str) -> None
     assert normalize_cron_day_of_week(f"0 9 * * {day_name.upper()}") == (
         f"0 9 * * {day_name}"
     )
+
+
+def test_normalize_cron_day_of_week_rejects_stepped_numeric_sunday_alias_range() -> None:
+    with pytest.raises(ValueError, match="step"):
+        normalize_cron_day_of_week("0 9 * * 0-7/2")
+
+
+def test_validate_schedule_accepts_sunday_alias_day_of_week_range() -> None:
+    schedule = validate_schedule(
+        {"enabled": True, "cron": "0 9 * * 6-7", "timezone": "UTC"}
+    )
+
+    assert schedule["cron"] == "0 9 * * sat,sun"
 
 
 def test_validate_schedule_treats_omitted_enabled_as_enabled() -> None:
