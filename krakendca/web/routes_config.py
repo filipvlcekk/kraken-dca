@@ -52,6 +52,13 @@ async def put_config(request: Request):
             "Existing config YAML is malformed.",
             fields={"config": "Existing config YAML is malformed."},
         ) from exc
+    except OSError as exc:
+        raise ApiException(
+            500,
+            "config_persistence_failed",
+            "Config could not be saved.",
+            details={"config_saved": False, "scheduler_reloaded": False},
+        ) from exc
 
     try:
         scheduler_status = request.app.state.reload_scheduler(saved)

@@ -498,6 +498,38 @@ def test_put_config_parser_error_text_is_sanitized(authed_client, monkeypatch) -
     assert secret not in json.dumps(body)
 
 
+def test_put_config_persistence_failure_returns_500_envelope_without_leak(
+    authed_client,
+    monkeypatch,
+) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, _path, csrf = authed_client(valid_config())
+
+    def raise_persistence_error(_path, _submitted):
+        raise OSError(f"disk error leaked {secret}")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_config.config_store.save_config",
+        raise_persistence_error,
+    )
+
+    response = client.put(
+        "/api/config",
+        json={"config": valid_config("XXBTZEUR")},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"]["code"] == "config_persistence_failed"
+    assert body["error"]["message"] == "Config could not be saved."
+    assert body["error"]["details"] == {
+        "config_saved": False,
+        "scheduler_reloaded": False,
+    }
+    assert secret not in json.dumps(body)
+
+
 def test_put_config_reports_reload_failure_after_save(authed_client) -> None:
     FakeSchedulerService.reload_exception = RuntimeError("boom")
     client, _path, csrf = authed_client(valid_config())
