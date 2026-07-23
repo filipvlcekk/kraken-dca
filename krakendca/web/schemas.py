@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from json import JSONDecodeError
 from typing import Any
 
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 
@@ -45,6 +47,27 @@ def error_response(
     if details is not None:
         error["details"] = details
     return JSONResponse({"ok": False, "error": error}, status_code=status_code)
+
+
+async def json_object_body(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except JSONDecodeError as exc:
+        raise ApiException(
+            400,
+            "validation_error",
+            "Request body must be valid JSON.",
+            fields={"body": "Request body must be valid JSON."},
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ApiException(
+            400,
+            "validation_error",
+            "Request body must be a JSON object.",
+            fields={"body": "Request body must be a JSON object."},
+        )
+    return payload
 
 
 def serialize_run_result(result: Any) -> dict[str, Any]:

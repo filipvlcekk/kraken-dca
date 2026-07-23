@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 
 import pytest
 import yaml
@@ -203,6 +204,27 @@ def test_missing_config_enters_setup_mode(authed_client) -> None:
     assert FakeSchedulerService.instances == []
 
 
+@pytest.mark.parametrize("config_text", ["[]", "foo"])
+def test_non_mapping_yaml_enters_degraded_mode_without_starting_scheduler(
+    authed_client,
+    config_text,
+) -> None:
+    client, _path, _csrf = authed_client(config_text)
+
+    response = client.get("/api/config")
+    scheduler_response = client.get("/api/scheduler")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["config_valid"] is False
+    assert data["config"] == {}
+    assert data["raw_yaml"] is None
+    assert "config" in data["validation_errors"]
+    assert scheduler_response.status_code == 200
+    assert scheduler_response.json()["data"]["running"] is False
+    assert FakeSchedulerService.instances == []
+
+
 def test_malformed_yaml_enters_degraded_mode_without_secrets(
     authed_client,
 ) -> None:
@@ -216,6 +238,53 @@ def test_malformed_yaml_enters_degraded_mode_without_secrets(
     assert data["config"] == {}
     assert data["validation_errors"]["config"]
     assert FakeSchedulerService.instances == []
+
+
+def test_malformed_yaml_does_not_leak_secret_text_in_degraded_config_response(
+    authed_client,
+) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, _path, _csrf = authed_client(
+        f'api:\n  private_key: "{secret}\ndca_pairs: []\n',
+    )
+
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["raw_yaml"] is None
+    assert secret not in json.dumps(body)
+
+
+def test_yaml_parser_error_text_is_sanitized_in_degraded_config_response(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f'api:\n  private_key: "{secret}\ndca_pairs: []\n',
+        encoding="utf-8",
+    )
+
+    def raise_parser_error(_path):
+        raise yaml.YAMLError(f"parser leaked {secret}")
+
+    monkeypatch.setattr(
+        "krakendca.web.app.load_config_preserving_root",
+        raise_parser_error,
+    )
+    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+
+    with TestClient(app) as client:
+        login = client.post("/api/session", json={"password": "secret"})
+        response = client.get("/api/config")
+
+    assert login.status_code == 200
+    body = response.json()
+    assert body["data"]["raw_yaml"] is None
+    assert secret not in json.dumps(body)
 
 
 def test_semantic_validation_errors_are_returned_redacted(
@@ -242,6 +311,40 @@ def test_put_config_requires_valid_csrf(authed_client) -> None:
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "csrf_invalid"
+
+
+def test_put_config_rejects_malformed_json_with_api_envelope(authed_client) -> None:
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.put(
+        "/api/config",
+        content=b'{"config":',
+        headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_put_config_rejects_non_object_json_with_api_envelope(authed_client) -> None:
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.put(
+        "/api/config",
+        json=[],
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": {
+            "code": "validation_error",
+            "message": "Request body must be a JSON object.",
+            "fields": {"body": "Request body must be a JSON object."},
+        },
+    }
 
 
 def test_put_config_saves_and_returns_required_scheduler_contract(
@@ -287,6 +390,50 @@ def test_put_config_validation_error_returns_400(authed_client) -> None:
     assert "dca_pairs.0.amount" in response.json()["error"]["fields"]
 
 
+def test_put_config_malformed_existing_yaml_error_does_not_leak_secret(
+    authed_client,
+) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, path, csrf = authed_client()
+    with open(path, "w", encoding="utf-8") as config_file:
+        config_file.write(f'api:\n  private_key: "{secret}\ndca_pairs: []\n')
+
+    response = client.put(
+        "/api/config",
+        json={"config": valid_config()},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert secret not in json.dumps(body)
+
+
+def test_put_config_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, _path, csrf = authed_client(valid_config())
+
+    def raise_parser_error(_path, _submitted):
+        raise yaml.YAMLError(f"parser leaked {secret}")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_config.config_store.save_config",
+        raise_parser_error,
+    )
+
+    response = client.put(
+        "/api/config",
+        json={"config": valid_config()},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert secret not in json.dumps(body)
+
+
 def test_put_config_reports_reload_failure_after_save(authed_client) -> None:
     FakeSchedulerService.reload_exception = RuntimeError("boom")
     client, _path, csrf = authed_client(valid_config())
@@ -321,6 +468,65 @@ def test_reload_reads_saved_config_not_client_payload(authed_client) -> None:
     assert FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
         "pair"
     ] == "XETHZEUR"
+
+
+@pytest.mark.parametrize("config_text", ["[]", "foo"])
+def test_reload_rejects_non_mapping_saved_config_with_validation_envelope(
+    authed_client,
+    config_text,
+) -> None:
+    client, _path, csrf = authed_client(config_text)
+
+    response = client.post(
+        "/api/scheduler/reload",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
+    assert response.json()["error"]["code"] == "validation_error"
+    assert "config" in response.json()["error"]["fields"]
+    assert FakeSchedulerService.instances == []
+
+
+def test_reload_malformed_yaml_error_does_not_leak_secret(authed_client) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, _path, csrf = authed_client(
+        f'api:\n  private_key: "{secret}\ndca_pairs: []\n',
+    )
+
+    response = client.post(
+        "/api/scheduler/reload",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert secret not in json.dumps(body)
+
+
+def test_reload_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:
+    secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    client, _path, csrf = authed_client(valid_config())
+
+    def raise_parser_error(_path):
+        raise yaml.YAMLError(f"parser leaked {secret}")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_scheduler.load_config_preserving_root",
+        raise_parser_error,
+    )
+
+    response = client.post(
+        "/api/scheduler/reload",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert secret not in json.dumps(body)
 
 
 def test_scheduler_status_returns_required_contract_for_active_scheduler(
@@ -377,6 +583,38 @@ def test_manual_run_maps_conflict_result_to_409(authed_client) -> None:
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "conflict"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("DELETE", "/api/session"),
+        ("POST", "/api/scheduler/reload"),
+        ("POST", "/api/pairs/XETHZEUR/run"),
+    ],
+)
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_authenticated_unsafe_api_routes_require_valid_csrf(
+    authed_client,
+    method,
+    path,
+    csrf_token,
+) -> None:
+    client, _path, _csrf = authed_client(valid_config())
+    headers = {}
+    if csrf_token is not None:
+        headers["X-CSRF-Token"] = csrf_token
+
+    response = client.request(method, path, headers=headers)
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "ok": False,
+        "error": {
+            "code": "csrf_invalid",
+            "message": "Missing or invalid CSRF token.",
+        },
+    }
 
 
 @pytest.mark.parametrize(

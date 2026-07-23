@@ -5,15 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from krakendca.web import auth
-from krakendca.web.schemas import ApiException, ok
+from krakendca.web.schemas import ApiException, json_object_body, ok
 
 router = APIRouter(prefix="/api/session", tags=["session"])
 
 
 @router.post("")
 async def login(request: Request):
-    payload = await request.json()
-    password = payload.get("password") if isinstance(payload, dict) else None
+    payload = await json_object_body(request)
+    password = payload.get("password")
     expected = request.app.state.web_ui_password
     if not isinstance(password, str) or not auth.verify_password(password, expected):
         raise ApiException(401, "unauthenticated", "Invalid password.")

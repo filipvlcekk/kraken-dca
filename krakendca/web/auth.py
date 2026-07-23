@@ -45,7 +45,7 @@ def new_csrf_token() -> str:
 
 
 def verify_password(submitted: str, expected: str) -> bool:
-    return compare_digest(submitted, expected)
+    return compare_digest(submitted.encode("utf-8"), expected.encode("utf-8"))
 
 
 def encode_session(

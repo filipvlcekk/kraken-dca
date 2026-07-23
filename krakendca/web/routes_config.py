@@ -7,7 +7,12 @@ from yaml import YAMLError
 
 from krakendca import config_store
 from krakendca.web import auth
-from krakendca.web.schemas import ApiException, ok, serialize_scheduler_status
+from krakendca.web.schemas import (
+    ApiException,
+    json_object_body,
+    ok,
+    serialize_scheduler_status,
+)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -21,8 +26,8 @@ async def get_config(request: Request):
 @router.put("")
 async def put_config(request: Request):
     auth.require_csrf(request)
-    payload = await request.json()
-    submitted = payload.get("config") if isinstance(payload, dict) else None
+    payload = await json_object_body(request)
+    submitted = payload.get("config")
     if not isinstance(submitted, dict):
         raise ApiException(
             400,
@@ -45,7 +50,7 @@ async def put_config(request: Request):
             400,
             "validation_error",
             "Existing config YAML is malformed.",
-            fields={"config": str(exc)},
+            fields={"config": "Existing config YAML is malformed."},
         ) from exc
 
     try:

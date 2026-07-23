@@ -14,11 +14,15 @@ from yaml import YAMLError
 from krakendca import config_store
 from krakendca.scheduler import SchedulerService
 from krakendca.web import auth
+from krakendca.web.config_loading import load_config_preserving_root
 from krakendca.web.routes_config import router as config_router
 from krakendca.web.routes_scheduler import router as scheduler_router
 from krakendca.web.routes_session import router as session_router
 from krakendca.web.schemas import ApiException, error_response
 from krakendca.web.static import static_response
+
+_YAML_PARSE_ERROR = "Config YAML is malformed."
+_CONFIG_ROOT_ERROR = "Config YAML root must be an object."
 
 
 def create_app(
@@ -95,7 +99,7 @@ def create_app(
 
 def _build_config_response(config_path: str) -> dict[str, Any]:
     try:
-        loaded = config_store.load_config(config_path)
+        loaded = load_config_preserving_root(config_path)
     except FileNotFoundError:
         return {
             "config": {},
@@ -105,13 +109,10 @@ def _build_config_response(config_path: str) -> dict[str, Any]:
             "raw_yaml": None,
         }
     except YAMLError as exc:
-        return {
-            "config": {},
-            "secrets": _empty_secrets(),
-            "config_valid": False,
-            "validation_errors": {"config": str(exc)},
-            "raw_yaml": None,
-        }
+        return _invalid_config_response(_YAML_PARSE_ERROR)
+
+    if not isinstance(loaded, dict):
+        return _invalid_config_response(_CONFIG_ROOT_ERROR)
 
     try:
         normalized = config_store.validate_config(loaded)
@@ -154,6 +155,16 @@ def _empty_secrets() -> dict:
     return {
         "public_key": {"configured": False, "source": None},
         "private_key": {"configured": False, "source": None},
+    }
+
+
+def _invalid_config_response(message: str) -> dict[str, Any]:
+    return {
+        "config": {},
+        "secrets": _empty_secrets(),
+        "config_valid": False,
+        "validation_errors": {"config": message},
+        "raw_yaml": None,
     }
 
 

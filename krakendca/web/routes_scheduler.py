@@ -7,6 +7,7 @@ from yaml import YAMLError
 
 from krakendca import config_store
 from krakendca.web import auth
+from krakendca.web.config_loading import load_config_preserving_root
 from krakendca.web.schemas import (
     ApiException,
     ok,
@@ -15,6 +16,9 @@ from krakendca.web.schemas import (
 )
 
 router = APIRouter(tags=["scheduler"])
+
+_YAML_PARSE_ERROR = "Config YAML is malformed."
+_CONFIG_ROOT_ERROR = "Config YAML root must be an object."
 
 
 @router.get("/api/scheduler")
@@ -30,7 +34,14 @@ async def get_scheduler(request: Request):
 async def reload_scheduler(request: Request):
     auth.require_csrf(request)
     try:
-        config = config_store.load_config(request.app.state.config_path)
+        config = load_config_preserving_root(request.app.state.config_path)
+        if not isinstance(config, dict):
+            raise ApiException(
+                400,
+                "validation_error",
+                _CONFIG_ROOT_ERROR,
+                fields={"config": _CONFIG_ROOT_ERROR},
+            )
         normalized = config_store.validate_config(config)
     except FileNotFoundError as exc:
         raise ApiException(
@@ -50,8 +61,8 @@ async def reload_scheduler(request: Request):
         raise ApiException(
             400,
             "validation_error",
-            "Config YAML is malformed.",
-            fields={"config": str(exc)},
+            _YAML_PARSE_ERROR,
+            fields={"config": _YAML_PARSE_ERROR},
         ) from exc
 
     try:

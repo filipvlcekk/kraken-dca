@@ -21,7 +21,7 @@ def static_response(path: str, request: Request) -> Response:
     static_dir = Path(request.app.state.static_dir)
     normalized = path.strip("/")
 
-    if _is_public_path(normalized):
+    if _is_public_path(static_dir, normalized):
         return _file_or_fallback(static_dir, normalized)
 
     if auth.decode_session(request) is None:
@@ -29,8 +29,12 @@ def static_response(path: str, request: Request) -> Response:
     return _file_or_fallback(static_dir, normalized)
 
 
-def _is_public_path(path: str) -> bool:
-    return path in {"login", "favicon.ico"} or path.startswith("assets/")
+def _is_public_path(static_dir: Path, path: str) -> bool:
+    if path in {"login", "favicon.ico"}:
+        return True
+    if not path.startswith("assets/"):
+        return False
+    return _inside_static_dir(static_dir / "assets", static_dir / path)
 
 
 def _file_or_fallback(static_dir: Path, path: str) -> Response:
