@@ -73,15 +73,22 @@ class SchedulerService:
                 normalized = config_store.validate_config(config, self._env)
                 fingerprint = config_store.fingerprint_config(normalized, self._env)
                 specs = self._build_job_specs(normalized)
+                run_gate = threading.Event()
                 if self._shutdown_requested:
                     self._scheduler = self._create_scheduler()
-                self._add_specs_to_scheduler(self._scheduler, specs, normalized)
+                self._add_specs_to_scheduler(
+                    self._scheduler,
+                    specs,
+                    normalized,
+                    run_gate,
+                )
                 self._active_config = normalized
                 self._job_specs = {spec.id: spec for spec in specs}
                 self.saved_config_fingerprint = fingerprint
                 self.active_config_fingerprint = fingerprint
                 self.reload_error = None
                 self._shutdown_requested = False
+                run_gate.set()
                 if not self._scheduler.running:
                     self._scheduler.start()
 
@@ -108,18 +115,20 @@ class SchedulerService:
             try:
                 specs = self._build_job_specs(normalized)
                 replacement_scheduler = self._create_scheduler()
-                replacement_job_ids = [spec.id for spec in specs]
-                self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
+                run_gate = threading.Event()
+                self._add_specs_to_scheduler(
+                    replacement_scheduler,
+                    specs,
+                    normalized,
+                    run_gate,
+                )
                 with self._state_lock:
                     active_scheduler_running = self._scheduler.running
                     shutdown_requested = self._shutdown_requested
                 if shutdown_requested:
                     raise _ReloadAborted("shutdown requested during scheduler reload")
                 if active_scheduler_running:
-                    replacement_scheduler.start(paused=True)
-                    for job_id in replacement_job_ids:
-                        replacement_scheduler.pause_job(job_id)
-                    replacement_scheduler.resume()
+                    replacement_scheduler.start()
 
                 old_scheduler = None
                 with self._state_lock:
@@ -144,9 +153,7 @@ class SchedulerService:
                     self._job_specs = {spec.id: spec for spec in specs}
                     self.active_config_fingerprint = saved_fingerprint
                     self.reload_error = None
-                    if active_scheduler_running:
-                        for job_id in replacement_job_ids:
-                            replacement_scheduler.resume_job(job_id)
+                    run_gate.set()
             except _ReloadAborted as exc:
                 if (
                     replacement_scheduler is not None
@@ -222,7 +229,12 @@ class SchedulerService:
         self,
         pair: str,
         config: dict,
+        run_gate: threading.Event,
     ) -> RunResult | None:
+        if not run_gate.is_set():
+            logger.info("Skipping scheduled DCA run for %s; job is not active.", pair)
+            return None
+
         lock = self._lock_for_pair(pair)
         if not lock.acquire(blocking=False):
             logger.warning("Skipping scheduled DCA run for %s; pair is busy.", pair)
@@ -298,12 +310,13 @@ class SchedulerService:
         scheduler: BackgroundScheduler,
         specs: list[_JobSpec],
         config: dict,
+        run_gate: threading.Event,
     ) -> None:
         for spec in specs:
             scheduler.add_job(
                 self._run_scheduled_pair,
                 trigger=spec.trigger,
-                args=[spec.pair, config],
+                args=[spec.pair, config, run_gate],
                 id=spec.id,
                 max_instances=1,
                 coalesce=True,

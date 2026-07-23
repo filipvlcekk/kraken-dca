@@ -239,8 +239,6 @@ def _control_replacement_scheduler_start(monkeypatch, on_start) -> list[object]:
 def _fake_scheduler_for_manual_job_trigger(
     monkeypatch,
     on_shutdown,
-    *,
-    resume_error: str | None = None,
 ) -> list[object]:
     import krakendca.scheduler as scheduler_module
 
@@ -287,8 +285,6 @@ def _fake_scheduler_for_manual_job_trigger(
             self.paused = paused
 
         def resume(self) -> None:
-            if resume_error is not None:
-                raise RuntimeError(resume_error)
             self.paused = False
 
         def pause(self) -> None:
@@ -1162,10 +1158,13 @@ def test_replacement_scheduled_job_callback_uses_new_config_before_swap(
 
     try:
         service.reload(new_config)
+        replacement_job = service._scheduler.get_job("legacy-delay:XETHZEUR")
+        replacement_job.func(*replacement_job.args, **replacement_job.kwargs)
     finally:
         service.shutdown()
 
     assert observed_active_config_values == ["OLD_PUBLIC_KEY"]
+    assert len(factory.calls) == 1
     assert factory.calls[-1] == ("NEW_PUBLIC_KEY", "NEW_PRIVATE_KEY")
     assert runner.calls[-1][0]["api"]["public_key"] == "NEW_PUBLIC_KEY"
     assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 2
@@ -1375,56 +1374,6 @@ def test_replacement_job_cannot_run_while_old_shutdown_blocks_after_shutdown_int
     assert status["config_applied"] is False
     assert "shutdown requested during scheduler reload" in status["reload_error"]
     assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
-
-
-def test_reload_resume_failure_preserves_previous_active_scheduler_state(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    old_config = _config(
-        [_pair("XETHZEUR", delay=1)],
-        api={
-            "public_key": "OLD_PUBLIC_KEY",
-            "private_key": "OLD_PRIVATE_KEY",
-        },
-    )
-    new_config = _config(
-        [_pair("XXBTZEUR", delay=1)],
-        api={
-            "public_key": "NEW_PUBLIC_KEY",
-            "private_key": "NEW_PRIVATE_KEY",
-        },
-    )
-    old_fingerprint = fingerprint_config(old_config, {})
-    new_fingerprint = fingerprint_config(new_config, {})
-    runner = FakeRunner()
-    factory = FakeKrakenFactory()
-    created_schedulers = _fake_scheduler_for_manual_job_trigger(
-        monkeypatch,
-        lambda scheduler: None,
-        resume_error="replacement resume failed",
-    )
-    service = _started_service(
-        tmp_path,
-        old_config,
-        runner=runner,
-        factory=factory,
-    )
-
-    try:
-        status = service.reload(new_config)
-        replacement_scheduler = created_schedulers[-1]
-        replacement_scheduler.trigger_job("legacy-delay:XXBTZEUR")
-    finally:
-        service.shutdown()
-
-    assert status["config_applied"] is False
-    assert status["saved_config_fingerprint"] == new_fingerprint
-    assert status["active_config_fingerprint"] == old_fingerprint
-    assert "replacement resume failed" in status["reload_error"]
-    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
-    assert factory.calls == []
-    assert runner.calls == []
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
