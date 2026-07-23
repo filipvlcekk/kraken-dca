@@ -129,6 +129,76 @@ def test_start_sets_running_true_and_matching_fingerprints(tmp_path) -> None:
     assert status["config_applied"] is True
 
 
+def test_not_started_status_reports_config_not_applied(tmp_path) -> None:
+    service = SchedulerService(
+        _write_config(tmp_path, _config([_pair()])),
+        env={},
+        kraken_api_factory=FakeKrakenFactory(),
+        runner=FakeRunner(),
+    )
+
+    status = service.status()
+
+    assert status["running"] is False
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] is None
+    assert status["active_config_fingerprint"] is None
+    assert status["jobs"] == []
+
+
+def test_start_assigns_active_state_before_starting_scheduler(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config([_pair("XETHZEUR", delay=1)])
+    expected_fingerprint = fingerprint_config(config, {})
+    service = SchedulerService(
+        _write_config(tmp_path, config),
+        env={},
+        kraken_api_factory=FakeKrakenFactory(),
+        runner=FakeRunner(),
+    )
+    observed = {}
+    original_start = service._scheduler.start
+
+    def start_spy(*args, **kwargs):
+        observed["active_config"] = service._active_config
+        observed["job_ids"] = set(service._job_specs)
+        observed["saved_fingerprint"] = service.saved_config_fingerprint
+        observed["active_fingerprint"] = service.active_config_fingerprint
+        observed["reload_error"] = service.reload_error
+        return original_start(*args, **kwargs)
+
+    monkeypatch.setattr(service._scheduler, "start", start_spy)
+
+    service.start()
+    try:
+        assert observed["active_config"] is not None
+        assert observed["active_config"]["dca_pairs"][0]["pair"] == "XETHZEUR"
+        assert observed["job_ids"] == {"legacy-delay:XETHZEUR"}
+        assert observed["saved_fingerprint"] == expected_fingerprint
+        assert observed["active_fingerprint"] == expected_fingerprint
+        assert observed["reload_error"] is None
+    finally:
+        service.shutdown()
+
+
+def test_shutdown_waits_for_running_jobs(tmp_path, monkeypatch) -> None:
+    service = _started_service(tmp_path, _config([_pair("XETHZEUR", delay=1)]))
+    observed = []
+    original_shutdown = service._scheduler.shutdown
+
+    def shutdown_spy(*, wait: bool = True):
+        observed.append(wait)
+        return original_shutdown(wait=wait)
+
+    monkeypatch.setattr(service._scheduler, "shutdown", shutdown_spy)
+
+    service.shutdown()
+
+    assert observed == [True]
+
+
 def test_reload_success_replaces_jobs_and_updates_lifecycle_state(tmp_path) -> None:
     service = _started_service(tmp_path, _config([_pair("XETHZEUR", delay=1)]))
     new_config = _config(
@@ -157,6 +227,89 @@ def test_reload_success_replaces_jobs_and_updates_lifecycle_state(tmp_path) -> N
     assert status["reload_error"] is None
     assert status["last_reload_at"] is not None
     assert {job["id"] for job in status["jobs"]} == {"dca:XXBTZEUR"}
+
+
+def test_reload_runtime_failure_preserves_previous_active_jobs_when_restore_succeeds(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config(
+        [
+            _pair(
+                "XETHZEUR",
+                schedule={
+                    "enabled": True,
+                    "cron": "0 9 * * *",
+                    "timezone": "UTC",
+                },
+                delay=None,
+            )
+        ]
+    )
+    service = _started_service(tmp_path, old_config)
+    old_fingerprint = fingerprint_config(old_config, {})
+    new_config = _config(
+        [
+            _pair(
+                "XXBTZEUR",
+                schedule={
+                    "enabled": True,
+                    "cron": "30 10 * * *",
+                    "timezone": "UTC",
+                },
+                delay=None,
+            )
+        ]
+    )
+    new_fingerprint = fingerprint_config(new_config, {})
+    original_add_job = service._scheduler.add_job
+
+    def add_job_spy(*args, **kwargs):
+        if kwargs.get("id") == "dca:XXBTZEUR":
+            raise RuntimeError("new job add failed")
+        return original_add_job(*args, **kwargs)
+
+    monkeypatch.setattr(service._scheduler, "add_job", add_job_spy)
+
+    try:
+        status = service.reload(new_config)
+    finally:
+        service.shutdown()
+
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] == new_fingerprint
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert "new job add failed" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"dca:XETHZEUR"}
+
+
+def test_reload_restore_failure_does_not_report_stale_jobs(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config([_pair("XETHZEUR", delay=1)])
+    service = _started_service(tmp_path, old_config)
+    old_fingerprint = fingerprint_config(old_config, {})
+    new_config = _config([_pair("XXBTZEUR", delay=1)])
+    new_fingerprint = fingerprint_config(new_config, {})
+
+    def add_job_spy(*args, **kwargs):
+        raise RuntimeError(f"cannot add {kwargs.get('id')}")
+
+    monkeypatch.setattr(service._scheduler, "add_job", add_job_spy)
+
+    try:
+        status = service.reload(new_config)
+        actual_scheduler_jobs = service._scheduler.get_jobs()
+    finally:
+        service.shutdown()
+
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] == new_fingerprint
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert status["jobs"] == []
+    assert actual_scheduler_jobs == []
+    assert "cannot add legacy-delay:XXBTZEUR" in status["reload_error"]
 
 
 def test_scheduler_jobs_use_required_apscheduler_options(tmp_path) -> None:
@@ -414,6 +567,7 @@ def test_manual_run_returns_conflict_when_pair_is_already_running(tmp_path) -> N
 
 def test_manual_run_returns_config_not_applied_when_fingerprints_differ(
     tmp_path,
+    monkeypatch,
 ) -> None:
     runner = FakeRunner()
     service = _started_service(
@@ -431,17 +585,27 @@ def test_manual_run_returns_config_not_applied_when_fingerprints_differ(
         ),
         runner=runner,
     )
+    original_add_job = service._scheduler.add_job
+
+    def add_job_spy(*args, **kwargs):
+        if kwargs.get("id") == "dca:XXBTZEUR":
+            raise RuntimeError("new job add failed")
+        return original_add_job(*args, **kwargs)
+
+    monkeypatch.setattr(service._scheduler, "add_job", add_job_spy)
 
     try:
         service.reload(
             _config(
                 [
                     _pair(
+                        "XXBTZEUR",
                         schedule={
                             "enabled": True,
-                            "cron": "0 9 L * *",
+                            "cron": "30 10 * * *",
                             "timezone": "UTC",
-                        }
+                        },
+                        delay=None,
                     )
                 ]
             )
@@ -453,6 +617,58 @@ def test_manual_run_returns_config_not_applied_when_fingerprints_differ(
     assert result.status == "failed"
     assert result.reason == "config_not_applied"
     assert runner.calls == []
+
+
+def test_manual_run_uses_same_active_config_snapshot_when_reload_happens(
+    tmp_path,
+) -> None:
+    runner_calls = []
+    factory_calls = []
+    old_config = _config(
+        [_pair("XETHZEUR", delay=1)],
+        api={
+            "public_key": "OLD_PUBLIC_KEY",
+            "private_key": "OLD_PRIVATE_KEY",
+        },
+    )
+    new_config = _config(
+        [_pair("XETHZEUR", delay=2)],
+        api={
+            "public_key": "NEW_PUBLIC_KEY",
+            "private_key": "NEW_PRIVATE_KEY",
+        },
+    )
+
+    def factory(public_key: str, private_key: str) -> dict:
+        factory_calls.append((public_key, private_key))
+        service.reload(new_config)
+        return {"public_key": public_key, "private_key": private_key}
+
+    def runner(config: dict, pair: str, kraken_api: object) -> RunResult:
+        runner_calls.append((config, pair, kraken_api))
+        return _ok_result(pair)
+
+    service = SchedulerService(
+        _write_config(tmp_path, old_config),
+        env={},
+        kraken_api_factory=factory,
+        runner=runner,
+    )
+    service.start()
+
+    try:
+        result = service.run_pair_now("XETHZEUR")
+    finally:
+        service.shutdown()
+
+    assert result.status == "success"
+    assert factory_calls == [("OLD_PUBLIC_KEY", "OLD_PRIVATE_KEY")]
+    assert runner_calls[0][0]["api"]["public_key"] == "OLD_PUBLIC_KEY"
+    assert runner_calls[0][0]["dca_pairs"][0]["delay"] == 1
+    assert runner_calls[0][2] == {
+        "public_key": "OLD_PUBLIC_KEY",
+        "private_key": "OLD_PRIVATE_KEY",
+    }
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(

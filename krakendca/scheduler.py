@@ -67,20 +67,19 @@ class SchedulerService:
             fingerprint = config_store.fingerprint_config(normalized, self._env)
             specs = self._build_job_specs(normalized)
             self._add_specs_to_scheduler(specs)
-            if not self._scheduler.running:
-                self._scheduler.start()
-
             self._active_config = normalized
             self._job_specs = {spec.id: spec for spec in specs}
             self.saved_config_fingerprint = fingerprint
             self.active_config_fingerprint = fingerprint
             self.reload_error = None
+            if not self._scheduler.running:
+                self._scheduler.start()
 
     def shutdown(self) -> None:
         """Stop APScheduler if it is running."""
         with self._state_lock:
             if self._scheduler.running:
-                self._scheduler.shutdown(wait=False)
+                self._scheduler.shutdown(wait=True)
 
     def reload(self, config: dict) -> dict:
         """Validate config and atomically replace active scheduler jobs."""
@@ -110,10 +109,7 @@ class SchedulerService:
         with self._state_lock:
             return {
                 "running": self._scheduler.running,
-                "config_applied": (
-                    self.saved_config_fingerprint
-                    == self.active_config_fingerprint
-                ),
+                "config_applied": self._config_applied(),
                 "saved_config_fingerprint": self.saved_config_fingerprint,
                 "active_config_fingerprint": self.active_config_fingerprint,
                 "reload_error": self.reload_error,
@@ -161,16 +157,19 @@ class SchedulerService:
             lock.release()
 
     def _run_pair_with_active_config(self, pair: str) -> RunResult:
-        if self._active_config is None:
+        with self._state_lock:
+            active_config = self._active_config
+
+        if active_config is None:
             return _failed_result(
                 pair,
                 "config_not_loaded",
                 "Scheduler config has not been loaded.",
             )
 
-        public_key, private_key = self._effective_api_keys(self._active_config)
+        public_key, private_key = self._effective_api_keys(active_config)
         kraken_api = self._kraken_api_factory(public_key, private_key)
-        return self._runner(self._active_config, pair, kraken_api)
+        return self._runner(active_config, pair, kraken_api)
 
     def _build_job_specs(self, config: dict) -> list[_JobSpec]:
         specs = []
@@ -219,9 +218,16 @@ class SchedulerService:
         self._scheduler.remove_all_jobs()
         try:
             self._add_specs_to_scheduler(specs)
-        except Exception:
+        except Exception as replace_exc:
             self._scheduler.remove_all_jobs()
-            self._add_specs_to_scheduler(previous_specs)
+            try:
+                self._add_specs_to_scheduler(previous_specs)
+            except Exception as restore_exc:
+                self._scheduler.remove_all_jobs()
+                self._job_specs = {}
+                raise RuntimeError(
+                    f"{replace_exc}; rollback failed: {restore_exc}"
+                ) from restore_exc
             raise
 
     def _add_specs_to_scheduler(self, specs: list[_JobSpec]) -> None:
@@ -274,6 +280,14 @@ class SchedulerService:
         if self._env is None:
             return os.environ.get(key)
         return self._env.get(key)
+
+    def _config_applied(self) -> bool:
+        return (
+            self.saved_config_fingerprint is not None
+            and self.active_config_fingerprint is not None
+            and self.saved_config_fingerprint
+            == self.active_config_fingerprint
+        )
 
 
 def _failed_result(pair: str, reason: str, message: str) -> RunResult:
