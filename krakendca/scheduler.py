@@ -66,7 +66,7 @@ class SchedulerService:
             normalized = config_store.validate_config(config, self._env)
             fingerprint = config_store.fingerprint_config(normalized, self._env)
             specs = self._build_job_specs(normalized)
-            self._add_specs_to_scheduler(self._scheduler, specs)
+            self._add_specs_to_scheduler(self._scheduler, specs, normalized)
             self._active_config = normalized
             self._job_specs = {spec.id: spec for spec in specs}
             self.saved_config_fingerprint = fingerprint
@@ -93,7 +93,7 @@ class SchedulerService:
         try:
             specs = self._build_job_specs(normalized)
             replacement_scheduler = self._create_scheduler()
-            self._add_specs_to_scheduler(replacement_scheduler, specs)
+            self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
             with self._state_lock:
                 active_scheduler_running = self._scheduler.running
             if active_scheduler_running:
@@ -171,14 +171,18 @@ class SchedulerService:
         finally:
             lock.release()
 
-    def _run_scheduled_pair(self, pair: str) -> RunResult | None:
+    def _run_scheduled_pair(
+        self,
+        pair: str,
+        config: dict,
+    ) -> RunResult | None:
         lock = self._lock_for_pair(pair)
         if not lock.acquire(blocking=False):
             logger.warning("Skipping scheduled DCA run for %s; pair is busy.", pair)
             return None
 
         try:
-            return self._run_pair_with_active_config(pair)
+            return self._run_pair_with_config(pair, config)
         finally:
             lock.release()
 
@@ -246,12 +250,13 @@ class SchedulerService:
         self,
         scheduler: BackgroundScheduler,
         specs: list[_JobSpec],
+        config: dict,
     ) -> None:
         for spec in specs:
             scheduler.add_job(
                 self._run_scheduled_pair,
                 trigger=spec.trigger,
-                args=[spec.pair],
+                args=[spec.pair, config],
                 id=spec.id,
                 max_instances=1,
                 coalesce=True,

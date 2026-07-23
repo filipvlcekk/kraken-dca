@@ -136,6 +136,29 @@ def _fail_replacement_scheduler(
     return created
 
 
+def _observe_replacement_scheduler_start(monkeypatch, on_start) -> None:
+    import krakendca.scheduler as scheduler_module
+
+    original_scheduler = scheduler_module.BackgroundScheduler
+
+    class ControlledScheduler:
+        def __init__(self, *args, **kwargs) -> None:
+            self._scheduler = original_scheduler(*args, **kwargs)
+
+        @property
+        def running(self) -> bool:
+            return self._scheduler.running
+
+        def start(self, *args, **kwargs):
+            on_start(self)
+            return self._scheduler.start(*args, **kwargs)
+
+        def __getattr__(self, name: str):
+            return getattr(self._scheduler, name)
+
+    monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
+
+
 def test_start_sets_running_true_and_matching_fingerprints(tmp_path) -> None:
     config = _config(
         [
@@ -781,6 +804,92 @@ def test_manual_run_uses_same_active_config_snapshot_when_reload_happens(
         "public_key": "OLD_PUBLIC_KEY",
         "private_key": "OLD_PRIVATE_KEY",
     }
+
+
+def test_old_scheduled_job_callback_keeps_original_config_after_reload(
+    tmp_path,
+) -> None:
+    runner = FakeRunner()
+    factory = FakeKrakenFactory()
+    old_config = _config(
+        [_pair("XETHZEUR", delay=1)],
+        api={
+            "public_key": "OLD_PUBLIC_KEY",
+            "private_key": "OLD_PRIVATE_KEY",
+        },
+    )
+    new_config = _config(
+        [_pair("XETHZEUR", delay=2)],
+        api={
+            "public_key": "NEW_PUBLIC_KEY",
+            "private_key": "NEW_PRIVATE_KEY",
+        },
+    )
+    service = _started_service(
+        tmp_path,
+        old_config,
+        runner=runner,
+        factory=factory,
+    )
+    old_job = service._scheduler.get_job("legacy-delay:XETHZEUR")
+
+    try:
+        service.reload(new_config)
+        old_job.func(*old_job.args, **old_job.kwargs)
+    finally:
+        service.shutdown()
+
+    assert factory.calls[-1] == ("OLD_PUBLIC_KEY", "OLD_PRIVATE_KEY")
+    assert runner.calls[-1][0]["api"]["public_key"] == "OLD_PUBLIC_KEY"
+    assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 1
+
+
+def test_replacement_scheduled_job_callback_uses_new_config_before_swap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = FakeRunner()
+    factory = FakeKrakenFactory()
+    old_config = _config(
+        [_pair("XETHZEUR", delay=1)],
+        api={
+            "public_key": "OLD_PUBLIC_KEY",
+            "private_key": "OLD_PRIVATE_KEY",
+        },
+    )
+    new_config = _config(
+        [_pair("XETHZEUR", delay=2)],
+        api={
+            "public_key": "NEW_PUBLIC_KEY",
+            "private_key": "NEW_PRIVATE_KEY",
+        },
+    )
+    service = _started_service(
+        tmp_path,
+        old_config,
+        runner=runner,
+        factory=factory,
+    )
+    observed_active_config_values = []
+
+    def on_start(replacement_scheduler) -> None:
+        observed_active_config_values.append(
+            service._active_config["api"]["public_key"]
+        )
+        replacement_job = replacement_scheduler.get_job("legacy-delay:XETHZEUR")
+        replacement_job.func(*replacement_job.args, **replacement_job.kwargs)
+
+    _observe_replacement_scheduler_start(monkeypatch, on_start)
+
+    try:
+        service.reload(new_config)
+    finally:
+        service.shutdown()
+
+    assert observed_active_config_values == ["OLD_PUBLIC_KEY"]
+    assert factory.calls[-1] == ("NEW_PUBLIC_KEY", "NEW_PRIVATE_KEY")
+    assert runner.calls[-1][0]["api"]["public_key"] == "NEW_PUBLIC_KEY"
+    assert runner.calls[-1][0]["dca_pairs"][0]["delay"] == 2
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
