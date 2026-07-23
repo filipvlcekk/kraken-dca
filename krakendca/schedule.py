@@ -154,10 +154,12 @@ def _normalize_day_of_week_part(part: str) -> str:
         base, step = part.split("/", 1)
         if not step.isdigit():
             raise ValueError("cron day of week step must be numeric.")
+        step_value = int(step)
+        if step_value <= 0:
+            raise ValueError("cron day of week step must be greater than zero.")
         if _is_numeric_sunday_alias_range(base):
-            raise ValueError(
-                "cron day of week step is not supported for Sunday alias ranges."
-            )
+            start, end = base.split("-", 1)
+            return ",".join(_expand_numeric_day_range(start, end, step_value))
         return f"{_normalize_day_of_week_part(base)}/{step}"
 
     if "-" in part:
@@ -187,8 +189,8 @@ def _is_numeric_sunday_alias_range(part: str) -> bool:
     return start.isdigit() and end.isdigit() and (start == "0" or end == "7")
 
 
-def _expand_numeric_day_range(start: str, end: str) -> list[str]:
-    day_numbers = list(range(int(start), int(end) + 1))
+def _expand_numeric_day_range(start: str, end: str, step: int = 1) -> list[str]:
+    day_numbers = list(range(int(start), int(end) + 1, step))
     day_names = []
     for day_number in day_numbers:
         day_name = _DAY_NUMBERS[str(day_number)]
