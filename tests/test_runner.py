@@ -1,8 +1,10 @@
 """runner.py tests module."""
 from datetime import datetime
+from types import SimpleNamespace
 
 from freezegun import freeze_time
 
+from krakendca.pair import Pair
 from krakendca.runner import RunResult, run_pair
 
 
@@ -16,16 +18,14 @@ class FakeKrakenApi:
         open_orders: dict | None = None,
         closed_orders: dict | None = None,
         ask_price: str = "100.0",
+        asset_pairs: dict | None = None,
+        asset_pairs_exception: Exception | None = None,
     ) -> None:
         self.balance = balance
         self.open_orders = open_orders or {}
         self.closed_orders = closed_orders or {}
         self.ask_price = ask_price
-        self.closed_order_queries: list[dict] = []
-        self.created_orders: list[dict] = []
-
-    def get_asset_pairs(self) -> dict:
-        return {
+        self.asset_pairs = asset_pairs or {
             "XETHZEUR": {
                 "altname": "ETHEUR",
                 "base": "XETH",
@@ -35,6 +35,16 @@ class FakeKrakenApi:
                 "ordermin": "0.005",
             }
         }
+        self.asset_pairs_exception = asset_pairs_exception
+        self.get_asset_pairs_calls = 0
+        self.closed_order_queries: list[dict] = []
+        self.created_orders: list[dict] = []
+
+    def get_asset_pairs(self) -> dict:
+        self.get_asset_pairs_calls += 1
+        if self.asset_pairs_exception is not None:
+            raise self.asset_pairs_exception
+        return self.asset_pairs
 
     def get_assets(self) -> dict:
         return {"ZEUR": {"decimals": 4}}
@@ -111,6 +121,10 @@ def pair_order(pair: str = "ETHEUR", amount: float = 20.0) -> dict:
             "vol": str(amount / 100.0),
         }
     }
+
+
+def runner_pair() -> Pair:
+    return Pair("XETHZEUR", "ETHEUR", "XETH", "ZEUR", 2, 8, 4, 0.005)
 
 
 @freeze_time("2021-05-03 00:00:00")
@@ -248,3 +262,99 @@ def test_scheduled_run_logs_unwritable_order_history_failure(
     assert result.reason == "history_unwritable"
     assert "Order history is not writable" in captured
     assert "No order submitted" in captured
+
+
+def test_kraken_exception_returns_failed_kraken_error():
+    result = run_pair(
+        legacy_config(),
+        "XETHZEUR",
+        FakeKrakenApi(asset_pairs_exception=ConnectionError("network down")),
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "kraken_error"
+    assert result.order_txid is None
+    assert "network down" in result.message
+
+
+def test_run_pair_fetches_asset_pairs_once_and_builds_pair(monkeypatch):
+    asset_pairs = {"asset-pairs": {"sentinel": True}}
+    ka = FakeKrakenApi(asset_pairs=asset_pairs)
+    captured = {}
+
+    def fake_get_pair_from_kraken(ka_arg, asset_pairs_arg, pair_name_arg):
+        captured["ka"] = ka_arg
+        captured["asset_pairs"] = asset_pairs_arg
+        captured["pair_name"] = pair_name_arg
+        return runner_pair()
+
+    class FakeDCA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_dca_logic(self):
+            return SimpleNamespace(
+                status="completed",
+                reason=None,
+                order_txid="OTEST-ORDER-TXID",
+                message="ok",
+            )
+
+    monkeypatch.setattr(
+        Pair,
+        "get_pair_from_kraken",
+        staticmethod(fake_get_pair_from_kraken),
+    )
+    monkeypatch.setattr("krakendca.runner.DCA", FakeDCA)
+
+    result = run_pair(legacy_config(), "XETHZEUR", ka)
+
+    assert result.status == "completed"
+    assert ka.get_asset_pairs_calls == 1
+    assert captured == {
+        "ka": ka,
+        "asset_pairs": asset_pairs,
+        "pair_name": "XETHZEUR",
+    }
+
+
+def test_duplicate_pair_config_returns_failed_without_calling_kraken():
+    config = {
+        "dca_pairs": [
+            {"pair": "XETHZEUR", "amount": 20.0, "delay": 1},
+            {"pair": "XETHZEUR", "amount": 25.0, "delay": 2},
+        ]
+    }
+    ka = FakeKrakenApi()
+
+    result = run_pair(config, "XETHZEUR", ka)
+
+    assert result.status == "failed"
+    assert result.reason == "duplicate_pair_config"
+    assert result.order_txid is None
+    assert ka.get_asset_pairs_calls == 0
+
+
+def test_legacy_runner_mode_preserves_delay(monkeypatch):
+    captured = {}
+
+    class FakeDCA:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        def handle_dca_logic(self):
+            return SimpleNamespace(
+                status="completed",
+                reason=None,
+                order_txid="OTEST-ORDER-TXID",
+                message="ok",
+            )
+
+    monkeypatch.setattr("krakendca.runner.DCA", FakeDCA)
+
+    result = run_pair(legacy_config(delay=7), "XETHZEUR", FakeKrakenApi())
+
+    assert result.status == "completed"
+    assert captured["args"][1] == 7
+    assert captured["kwargs"]["min_order_interval_minutes"] is None

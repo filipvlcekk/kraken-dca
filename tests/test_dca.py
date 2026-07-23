@@ -11,6 +11,7 @@ from krakenapi import KrakenApi
 from krakendca.dca import DCA
 from krakendca.order import Order
 from krakendca.pair import Pair
+from krakendca.utils import datetime_as_utc_unix
 
 
 class FakeKrakenApi:
@@ -465,6 +466,28 @@ class TestDCA:
 
         assert strict_dca.count_pair_daily_orders() == 2
         assert lenient_dca.count_pair_daily_orders() == 0
+
+    @freeze_time("2021-05-03 12:34:56")
+    def test_cron_closed_order_lookback_uses_utc_minute_start(self):
+        ka = FakeKrakenApi()
+        dca = DCA(
+            ka,
+            1,
+            fake_pair(),
+            20.0,
+            min_order_interval_minutes=15,
+        )
+
+        dca.count_pair_daily_orders()
+
+        assert ka.closed_order_queries == [
+            {
+                "start": datetime_as_utc_unix(
+                    datetime(2021, 5, 3, 12, 19, 56)
+                ),
+                "closetime": "open",
+            }
+        ]
 
     @freeze_time("2021-05-03 00:00:00")
     def test_unwritable_order_history_returns_failure_before_submission(

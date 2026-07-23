@@ -31,8 +31,8 @@ class RunResult:
 def run_pair(config: dict, pair_name: str, ka: KrakenApi) -> RunResult:
     """Run DCA logic for exactly one configured pair."""
     started_at = current_utc_datetime()
-    pair_config = _find_pair_config(config, pair_name)
-    if pair_config is None:
+    pair_configs = _find_pair_configs(config, pair_name)
+    if len(pair_configs) == 0:
         return _result(
             pair_name,
             "failed",
@@ -41,6 +41,17 @@ def run_pair(config: dict, pair_name: str, ka: KrakenApi) -> RunResult:
             None,
             f"Pair {pair_name} was not found in configuration.",
         )
+    if len(pair_configs) > 1:
+        return _result(
+            pair_name,
+            "failed",
+            "duplicate_pair_config",
+            started_at,
+            None,
+            f"Pair {pair_name} has multiple configuration entries.",
+        )
+
+    pair_config = pair_configs[0]
 
     try:
         asset_pairs = ka.get_asset_pairs()
@@ -68,15 +79,12 @@ def run_pair(config: dict, pair_name: str, ka: KrakenApi) -> RunResult:
     )
 
 
-def _find_pair_config(config: dict, pair_name: str) -> Optional[dict]:
-    pairs = [
+def _find_pair_configs(config: dict, pair_name: str) -> list[dict]:
+    return [
         dca_pair
         for dca_pair in (config.get("dca_pairs") or [])
         if dca_pair.get("pair") == pair_name
     ]
-    if len(pairs) != 1:
-        return None
-    return pairs[0]
 
 
 def _build_dca(
