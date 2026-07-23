@@ -108,6 +108,7 @@ class SchedulerService:
             try:
                 specs = self._build_job_specs(normalized)
                 replacement_scheduler = self._create_scheduler()
+                replacement_job_ids = [spec.id for spec in specs]
                 self._add_specs_to_scheduler(replacement_scheduler, specs, normalized)
                 with self._state_lock:
                     active_scheduler_running = self._scheduler.running
@@ -116,6 +117,9 @@ class SchedulerService:
                     raise _ReloadAborted("shutdown requested during scheduler reload")
                 if active_scheduler_running:
                     replacement_scheduler.start(paused=True)
+                    for job_id in replacement_job_ids:
+                        replacement_scheduler.pause_job(job_id)
+                    replacement_scheduler.resume()
 
                 old_scheduler = None
                 with self._state_lock:
@@ -140,8 +144,9 @@ class SchedulerService:
                     self._job_specs = {spec.id: spec for spec in specs}
                     self.active_config_fingerprint = saved_fingerprint
                     self.reload_error = None
-                if active_scheduler_running:
-                    replacement_scheduler.resume()
+                    if active_scheduler_running:
+                        for job_id in replacement_job_ids:
+                            replacement_scheduler.resume_job(job_id)
             except _ReloadAborted as exc:
                 if (
                     replacement_scheduler is not None

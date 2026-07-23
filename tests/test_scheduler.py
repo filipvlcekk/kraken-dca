@@ -236,7 +236,12 @@ def _control_replacement_scheduler_start(monkeypatch, on_start) -> list[object]:
     return created
 
 
-def _fake_scheduler_for_manual_job_trigger(monkeypatch, on_shutdown) -> list[object]:
+def _fake_scheduler_for_manual_job_trigger(
+    monkeypatch,
+    on_shutdown,
+    *,
+    resume_error: str | None = None,
+) -> list[object]:
     import krakendca.scheduler as scheduler_module
 
     created = []
@@ -247,6 +252,7 @@ def _fake_scheduler_for_manual_job_trigger(monkeypatch, on_shutdown) -> list[obj
             self.args = args
             self.kwargs = kwargs
             self.id = job_id
+            self.paused = False
             self.next_run_time = None
             self.max_instances = 1
             self.coalesce = True
@@ -281,7 +287,20 @@ def _fake_scheduler_for_manual_job_trigger(monkeypatch, on_shutdown) -> list[obj
             self.paused = paused
 
         def resume(self) -> None:
+            if resume_error is not None:
+                raise RuntimeError(resume_error)
             self.paused = False
+
+        def pause(self) -> None:
+            self.paused = True
+
+        def pause_job(self, job_id: str):
+            self.jobs[job_id].paused = True
+            return self.jobs[job_id]
+
+        def resume_job(self, job_id: str):
+            self.jobs[job_id].paused = False
+            return self.jobs[job_id]
 
         def shutdown(self, *, wait: bool = True):
             on_shutdown(self)
@@ -298,6 +317,8 @@ def _fake_scheduler_for_manual_job_trigger(monkeypatch, on_shutdown) -> list[obj
             if not self._running or self.paused:
                 return None
             job = self.jobs[job_id]
+            if job.paused:
+                return None
             return job.func(*job.args, **job.kwargs)
 
     monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
@@ -1354,6 +1375,56 @@ def test_replacement_job_cannot_run_while_old_shutdown_blocks_after_shutdown_int
     assert status["config_applied"] is False
     assert "shutdown requested during scheduler reload" in status["reload_error"]
     assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+
+
+def test_reload_resume_failure_preserves_previous_active_scheduler_state(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config(
+        [_pair("XETHZEUR", delay=1)],
+        api={
+            "public_key": "OLD_PUBLIC_KEY",
+            "private_key": "OLD_PRIVATE_KEY",
+        },
+    )
+    new_config = _config(
+        [_pair("XXBTZEUR", delay=1)],
+        api={
+            "public_key": "NEW_PUBLIC_KEY",
+            "private_key": "NEW_PRIVATE_KEY",
+        },
+    )
+    old_fingerprint = fingerprint_config(old_config, {})
+    new_fingerprint = fingerprint_config(new_config, {})
+    runner = FakeRunner()
+    factory = FakeKrakenFactory()
+    created_schedulers = _fake_scheduler_for_manual_job_trigger(
+        monkeypatch,
+        lambda scheduler: None,
+        resume_error="replacement resume failed",
+    )
+    service = _started_service(
+        tmp_path,
+        old_config,
+        runner=runner,
+        factory=factory,
+    )
+
+    try:
+        status = service.reload(new_config)
+        replacement_scheduler = created_schedulers[-1]
+        replacement_scheduler.trigger_job("legacy-delay:XXBTZEUR")
+    finally:
+        service.shutdown()
+
+    assert status["config_applied"] is False
+    assert status["saved_config_fingerprint"] == new_fingerprint
+    assert status["active_config_fingerprint"] == old_fingerprint
+    assert "replacement resume failed" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+    assert factory.calls == []
+    assert runner.calls == []
 
 
 def test_reload_failure_preserves_previous_active_jobs_and_reports_mismatch(
