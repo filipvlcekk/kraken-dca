@@ -74,20 +74,26 @@ def validate_config(config: dict, env: dict | None = None) -> dict:
 
 def redact_config(config: dict, env: dict | None = None) -> dict:
     """Return a redacted config plus secret metadata for API responses."""
-    normalized = validate_config(config, env)
     env_values = _env(env)
-    redacted = copy.deepcopy(normalized)
+    source = config or {}
+    redacted = copy.deepcopy(source)
     redacted_api = {}
     secrets = {}
+    api = source.get("api") or {}
+    if not isinstance(api, dict):
+        api = {}
 
     for key, env_var in (
         ("public_key", _PUBLIC_ENV_VAR),
         ("private_key", _PRIVATE_ENV_VAR),
     ):
-        file_value = normalized.get("api", {}).get(key)
-        if file_value is not None:
+        file_value = api.get(key)
+        if isinstance(file_value, str) and file_value:
             redacted_api[key] = REDACTED_SECRET
             secrets[key] = {"configured": True, "source": "file"}
+        elif file_value == "":
+            redacted_api[key] = None
+            secrets[key] = {"configured": False, "source": None}
         elif env_values.get(env_var):
             redacted_api[key] = None
             secrets[key] = {"configured": True, "source": "env"}
@@ -113,6 +119,9 @@ def merge_redacted_config(
     api: dict = {}
     for key in ("public_key", "private_key"):
         if key not in submitted_api:
+            existing_value = existing_api.get(key)
+            if existing_value is not None:
+                api[key] = existing_value
             continue
 
         value = submitted_api.get(key)

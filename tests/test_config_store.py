@@ -210,6 +210,40 @@ def test_replaces_redacted_credentials_when_new_strings_are_submitted(
     assert saved["api"]["private_key"] == "NEW_PRIVATE_KEY"
 
 
+def test_partial_submission_preserves_omitted_existing_file_credentials() -> None:
+    existing = valid_config()
+    submitted = {
+        "api": {"public_key": "NEW_PUBLIC_KEY"},
+        "dca_pairs": existing["dca_pairs"],
+    }
+
+    merged = merge_redacted_config(submitted, existing)
+
+    assert merged["api"]["public_key"] == "NEW_PUBLIC_KEY"
+    assert merged["api"]["private_key"] == "FILE_PRIVATE_KEY"
+
+
+def test_partial_save_preserves_omitted_existing_file_credentials(
+    tmp_path,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(valid_config()), encoding="utf-8")
+    submitted = {
+        "api": {"public_key": "NEW_PUBLIC_KEY"},
+        "dca_pairs": valid_config()["dca_pairs"],
+    }
+
+    save_config(
+        str(path),
+        submitted,
+        {"KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE_KEY"},
+    )
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert saved["api"]["public_key"] == "NEW_PUBLIC_KEY"
+    assert saved["api"]["private_key"] == "FILE_PRIVATE_KEY"
+
+
 def test_env_secret_metadata_shape() -> None:
     config = {
         "dca_pairs": [{"pair": "XETHZEUR", "delay": 1, "amount": 15}]
@@ -263,6 +297,27 @@ def test_null_credentials_are_omitted_on_save_and_may_use_env(tmp_path) -> None:
             "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE",
         },
     )
+
+
+def test_explicit_null_credential_omits_that_key_when_env_exists(
+    tmp_path,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(valid_config()), encoding="utf-8")
+    submitted = {
+        "api": {"public_key": None},
+        "dca_pairs": valid_config()["dca_pairs"],
+    }
+
+    save_config(
+        str(path),
+        submitted,
+        {"KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC"},
+    )
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert "public_key" not in saved["api"]
+    assert saved["api"]["private_key"] == "FILE_PRIVATE_KEY"
 
 
 def test_atomic_save_creates_timestamped_backup(tmp_path, monkeypatch) -> None:
@@ -379,6 +434,45 @@ def test_empty_string_credentials_are_invalid() -> None:
     }
 
 
+def test_redact_config_redacts_credentials_without_validating_pairs() -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["delay"] = "bad"
+    config["dca_pairs"][0].pop("amount")
+
+    result = redact_config(config)
+
+    assert result["config"]["api"] == {
+        "public_key": REDACTED_SECRET,
+        "private_key": REDACTED_SECRET,
+    }
+    assert result["config"]["dca_pairs"] == config["dca_pairs"]
+    assert result["secrets"] == {
+        "public_key": {"configured": True, "source": "file"},
+        "private_key": {"configured": True, "source": "file"},
+    }
+
+
+def test_redact_config_does_not_leak_empty_string_credentials() -> None:
+    config = valid_config()
+    config["api"]["public_key"] = ""
+
+    result = redact_config(config)
+
+    assert result["config"]["api"]["public_key"] is None
+    assert result["config"]["api"]["private_key"] == REDACTED_SECRET
+    assert result["secrets"]["public_key"] == {
+        "configured": False,
+        "source": None,
+    }
+    assert result["secrets"]["private_key"] == {
+        "configured": True,
+        "source": "file",
+    }
+
+    with pytest.raises(ConfigValidationError):
+        validate_config(config)
+
+
 def test_merge_redacted_config_preserves_replaces_and_omits_credentials() -> None:
     existing = valid_config()
     submitted = valid_config()
@@ -396,3 +490,4 @@ def test_merge_redacted_config_preserves_replaces_and_omits_credentials() -> Non
     merged = merge_redacted_config(submitted, existing)
 
     assert "public_key" not in merged.get("api", {})
+    assert merged["api"]["private_key"] == "FILE_PRIVATE_KEY"
