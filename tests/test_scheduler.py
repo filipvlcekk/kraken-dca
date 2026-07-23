@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 import yaml
 
-from krakendca.config_store import fingerprint_config
+from krakendca.config_store import ConfigValidationError, fingerprint_config
 from krakendca.runner import RunResult
 from krakendca.scheduler import SchedulerService
 
@@ -95,6 +95,148 @@ class FakeRunner:
     def __call__(self, config: dict, pair: str, kraken_api: object) -> RunResult:
         self.calls.append((config, pair, kraken_api))
         return _ok_result(pair)
+
+
+def test_start_sets_running_true_and_matching_fingerprints(tmp_path) -> None:
+    config = _config(
+        [
+            _pair(
+                schedule={
+                    "enabled": True,
+                    "cron": "0 9 * * *",
+                    "timezone": "UTC",
+                }
+            )
+        ]
+    )
+    expected_fingerprint = fingerprint_config(config, {})
+    service = SchedulerService(
+        _write_config(tmp_path, config),
+        env={},
+        kraken_api_factory=FakeKrakenFactory(),
+        runner=FakeRunner(),
+    )
+
+    service.start()
+    try:
+        status = service.status()
+    finally:
+        service.shutdown()
+
+    assert status["running"] is True
+    assert status["saved_config_fingerprint"] == expected_fingerprint
+    assert status["active_config_fingerprint"] == expected_fingerprint
+    assert status["config_applied"] is True
+
+
+def test_reload_success_replaces_jobs_and_updates_lifecycle_state(tmp_path) -> None:
+    service = _started_service(tmp_path, _config([_pair("XETHZEUR", delay=1)]))
+    new_config = _config(
+        [
+            _pair(
+                "XXBTZEUR",
+                schedule={
+                    "enabled": True,
+                    "cron": "30 10 * * *",
+                    "timezone": "Europe/Prague",
+                },
+                delay=None,
+            )
+        ]
+    )
+    expected_fingerprint = fingerprint_config(new_config, {})
+
+    try:
+        status = service.reload(new_config)
+    finally:
+        service.shutdown()
+
+    assert status["config_applied"] is True
+    assert status["saved_config_fingerprint"] == expected_fingerprint
+    assert status["active_config_fingerprint"] == expected_fingerprint
+    assert status["reload_error"] is None
+    assert status["last_reload_at"] is not None
+    assert {job["id"] for job in status["jobs"]} == {"dca:XXBTZEUR"}
+
+
+def test_scheduler_jobs_use_required_apscheduler_options(tmp_path) -> None:
+    service = _started_service(
+        tmp_path,
+        _config(
+            [
+                _pair(
+                    schedule={
+                        "enabled": True,
+                        "cron": "0 9 * * *",
+                        "timezone": "UTC",
+                    }
+                ),
+                _pair("XXBTZEUR", delay=2),
+            ]
+        ),
+    )
+
+    try:
+        jobs = {
+            job.id: job
+            for job in (
+                service._scheduler.get_job("dca:XETHZEUR"),
+                service._scheduler.get_job("legacy-delay:XXBTZEUR"),
+            )
+        }
+    finally:
+        service.shutdown()
+
+    for job in jobs.values():
+        assert job.max_instances == 1
+        assert job.coalesce is True
+        assert job.misfire_grace_time == 300
+
+
+def test_reload_validation_error_propagates_and_preserves_active_state(
+    tmp_path,
+) -> None:
+    config = _config(
+        [
+            _pair(
+                schedule={
+                    "enabled": True,
+                    "cron": "0 9 * * *",
+                    "timezone": "UTC",
+                }
+            )
+        ]
+    )
+    service = _started_service(tmp_path, config)
+    original_fingerprint = fingerprint_config(config, {})
+
+    try:
+        with pytest.raises(ConfigValidationError):
+            service.reload(
+                _config(
+                    [
+                        _pair(
+                            "XXBTZEUR",
+                            schedule={
+                                "enabled": True,
+                                "cron": "not cron",
+                                "timezone": "UTC",
+                            },
+                            delay=None,
+                        )
+                    ]
+                )
+            )
+        status = service.status()
+    finally:
+        service.shutdown()
+
+    assert status["config_applied"] is True
+    assert status["saved_config_fingerprint"] == original_fingerprint
+    assert status["active_config_fingerprint"] == original_fingerprint
+    assert status["reload_error"] is None
+    assert status["last_reload_at"] is None
+    assert {job["id"] for job in status["jobs"]} == {"dca:XETHZEUR"}
 
 
 def test_registers_enabled_cron_and_delay_only_jobs_but_not_disabled_jobs(
