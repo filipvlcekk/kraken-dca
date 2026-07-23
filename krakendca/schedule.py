@@ -28,20 +28,23 @@ def validate_schedule(schedule: dict) -> dict:
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be a boolean.")
 
+    has_cron = "cron" in schedule
+    has_timezone = "timezone" in schedule
     cron = schedule.get("cron")
     timezone = schedule.get("timezone")
     normalized = {"enabled": enabled}
 
-    if enabled and not cron:
+    if enabled and not has_cron:
         raise ValueError("cron is required for enabled schedules.")
 
-    if cron:
+    if has_cron:
         normalized["cron"] = _validate_cron(cron)
 
-    if enabled and timezone is None:
+    if enabled and not has_timezone:
         timezone = "UTC"
+        has_timezone = True
 
-    if timezone is not None:
+    if has_timezone:
         normalized["timezone"] = _validate_timezone(timezone)
 
     return normalized

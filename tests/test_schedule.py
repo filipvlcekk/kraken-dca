@@ -106,10 +106,28 @@ def test_validate_schedule_rejects_disabled_schedule_with_invalid_cron() -> None
         )
 
 
+@pytest.mark.parametrize("cron", ["", 0, []])
+def test_validate_schedule_rejects_disabled_schedule_with_invalid_falsey_cron(
+    cron: object,
+) -> None:
+    with pytest.raises(ValueError):
+        validate_schedule({"enabled": False, "cron": cron, "timezone": "UTC"})
+
+
 def test_validate_schedule_rejects_disabled_schedule_with_invalid_timezone() -> None:
     with pytest.raises(ValueError):
         validate_schedule(
             {"enabled": False, "cron": "0 9 * * *", "timezone": "Mars/Base"}
+        )
+
+
+@pytest.mark.parametrize("timezone", [None, "", 0, []])
+def test_validate_schedule_rejects_disabled_schedule_with_invalid_falsey_timezone(
+    timezone: object,
+) -> None:
+    with pytest.raises(ValueError):
+        validate_schedule(
+            {"enabled": False, "cron": "0 9 * * *", "timezone": timezone}
         )
 
 
