@@ -1,0 +1,65 @@
+"""Session API routes."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+
+from krakendca.web import auth
+from krakendca.web.schemas import ApiException, ok
+
+router = APIRouter(prefix="/api/session", tags=["session"])
+
+
+@router.post("")
+async def login(request: Request):
+    payload = await request.json()
+    password = payload.get("password") if isinstance(payload, dict) else None
+    expected = request.app.state.web_ui_password
+    if not isinstance(password, str) or not auth.verify_password(password, expected):
+        raise ApiException(401, "unauthenticated", "Invalid password.")
+
+    csrf_token = auth.new_csrf_token()
+    response = ok({"authenticated": True, "csrf_token": csrf_token})
+    _set_session_cookie(request, response, csrf_token)
+    return response
+
+
+@router.get("")
+async def current_session(request: Request):
+    session = auth.decode_session(request)
+    if session is None:
+        return ok({"authenticated": False})
+
+    csrf_token = auth.new_csrf_token()
+    response = ok({"authenticated": True, "csrf_token": csrf_token})
+    _set_session_cookie(request, response, csrf_token)
+    return response
+
+
+@router.delete("")
+async def logout(request: Request):
+    auth.require_csrf(request)
+    response = ok({"authenticated": False})
+    response.delete_cookie(
+        auth.COOKIE_NAME,
+        httponly=True,
+        samesite="strict",
+        secure=request.app.state.cookie_secure,
+    )
+    return response
+
+
+def _set_session_cookie(
+    request: Request,
+    response,
+    csrf_token: str,
+) -> None:
+    cookie = auth.encode_session(request.app.state.session_serializer, csrf_token)
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        cookie,
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="strict",
+        secure=request.app.state.cookie_secure,
+    )
