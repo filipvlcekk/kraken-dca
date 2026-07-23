@@ -115,7 +115,7 @@ class SchedulerService:
                 if shutdown_requested:
                     raise _ReloadAborted("shutdown requested during scheduler reload")
                 if active_scheduler_running:
-                    replacement_scheduler.start()
+                    replacement_scheduler.start(paused=True)
 
                 old_scheduler = None
                 with self._state_lock:
@@ -140,6 +140,8 @@ class SchedulerService:
                     self._job_specs = {spec.id: spec for spec in specs}
                     self.active_config_fingerprint = saved_fingerprint
                     self.reload_error = None
+                if active_scheduler_running:
+                    replacement_scheduler.resume()
             except _ReloadAborted as exc:
                 if (
                     replacement_scheduler is not None

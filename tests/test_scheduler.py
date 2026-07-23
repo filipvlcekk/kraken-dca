@@ -236,6 +236,74 @@ def _control_replacement_scheduler_start(monkeypatch, on_start) -> list[object]:
     return created
 
 
+def _fake_scheduler_for_manual_job_trigger(monkeypatch, on_shutdown) -> list[object]:
+    import krakendca.scheduler as scheduler_module
+
+    created = []
+
+    class FakeJob:
+        def __init__(self, func, args, kwargs, job_id: str) -> None:
+            self.func = func
+            self.args = args
+            self.kwargs = kwargs
+            self.id = job_id
+            self.next_run_time = None
+            self.max_instances = 1
+            self.coalesce = True
+            self.misfire_grace_time = 300
+
+    class ControlledScheduler:
+        def __init__(self, *args, **kwargs) -> None:
+            self.jobs: dict[str, FakeJob] = {}
+            self.job_ids: set[str] = set()
+            self.paused = False
+            self._running = False
+            created.append(self)
+
+        @property
+        def running(self) -> bool:
+            return self._running
+
+        def add_job(self, func, *args, **kwargs):
+            job_id = kwargs["id"]
+            job = FakeJob(
+                func=func,
+                args=kwargs.get("args", []),
+                kwargs=kwargs.get("kwargs", {}),
+                job_id=job_id,
+            )
+            self.jobs[job_id] = job
+            self.job_ids.add(job_id)
+            return job
+
+        def start(self, *, paused: bool = False):
+            self._running = True
+            self.paused = paused
+
+        def resume(self) -> None:
+            self.paused = False
+
+        def shutdown(self, *, wait: bool = True):
+            on_shutdown(self)
+            self._running = False
+            self.paused = False
+
+        def get_job(self, job_id: str):
+            return self.jobs.get(job_id)
+
+        def get_jobs(self):
+            return list(self.jobs.values())
+
+        def trigger_job(self, job_id: str):
+            if not self._running or self.paused:
+                return None
+            job = self.jobs[job_id]
+            return job.func(*job.args, **job.kwargs)
+
+    monkeypatch.setattr(scheduler_module, "BackgroundScheduler", ControlledScheduler)
+    return created
+
+
 def test_start_sets_running_true_and_matching_fingerprints(tmp_path) -> None:
     config = _config(
         [
@@ -1199,6 +1267,91 @@ def test_shutdown_intent_aborts_reload_blocked_in_old_scheduler_shutdown(
     assert status["config_applied"] is False
     assert status["saved_config_fingerprint"] == new_fingerprint
     assert status["active_config_fingerprint"] == old_fingerprint
+    assert "shutdown requested during scheduler reload" in status["reload_error"]
+    assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
+
+
+def test_replacement_job_cannot_run_while_old_shutdown_blocks_after_shutdown_intent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    old_config = _config(
+        [_pair("XETHZEUR", delay=1)],
+        api={
+            "public_key": "OLD_PUBLIC_KEY",
+            "private_key": "OLD_PRIVATE_KEY",
+        },
+    )
+    new_config = _config(
+        [_pair("XXBTZEUR", delay=1)],
+        api={
+            "public_key": "NEW_PUBLIC_KEY",
+            "private_key": "NEW_PRIVATE_KEY",
+        },
+    )
+    runner = FakeRunner()
+    factory = FakeKrakenFactory()
+    old_scheduler_shutdown_started = threading.Event()
+    release_old_scheduler_shutdown = threading.Event()
+
+    def on_shutdown(scheduler) -> None:
+        if "legacy-delay:XETHZEUR" in scheduler.job_ids:
+            old_scheduler_shutdown_started.set()
+            _wait_for(
+                release_old_scheduler_shutdown,
+                "old scheduler shutdown was not released",
+            )
+
+    created_schedulers = _fake_scheduler_for_manual_job_trigger(
+        monkeypatch,
+        on_shutdown,
+    )
+    service = _started_service(
+        tmp_path,
+        old_config,
+        runner=runner,
+        factory=factory,
+    )
+    lifecycle_lock = _ObservableLock()
+    service._lifecycle_lock = lifecycle_lock
+    shutdown_run = None
+
+    reload_run = _ThreadRun(lambda: service.reload(new_config))
+    try:
+        _wait_for(
+            old_scheduler_shutdown_started,
+            "reload did not reach old scheduler shutdown",
+        )
+        replacement_scheduler = created_schedulers[-1]
+        assert "legacy-delay:XXBTZEUR" in replacement_scheduler.job_ids
+
+        lifecycle_lock.acquire_attempted.clear()
+        shutdown_run = _ThreadRun(service.shutdown)
+        _wait_for(
+            lifecycle_lock.acquire_attempted,
+            "shutdown did not wait for lifecycle lock",
+        )
+        assert service._shutdown_requested is True
+
+        replacement_scheduler.trigger_job("legacy-delay:XXBTZEUR")
+
+        release_old_scheduler_shutdown.set()
+        reload_run.wait_finished()
+        shutdown_run.wait_finished()
+        status = service.status()
+    finally:
+        release_old_scheduler_shutdown.set()
+        if not reload_run.finished.is_set():
+            reload_run.wait_finished()
+        if shutdown_run is not None and not shutdown_run.finished.is_set():
+            shutdown_run.wait_finished()
+        else:
+            service.shutdown()
+
+    assert factory.calls == []
+    assert runner.calls == []
+    assert status["running"] is False
+    assert status["config_applied"] is False
     assert "shutdown requested during scheduler reload" in status["reload_error"]
     assert {job["id"] for job in status["jobs"]} == {"legacy-delay:XETHZEUR"}
 
