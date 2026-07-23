@@ -412,7 +412,7 @@ git commit -m "feat: add DCA run result orchestration"
 - Create: `krakendca/scheduler.py`
 - Create: `tests/test_scheduler.py`
 
-- [ ] **Step 1: Write failing scheduler tests**
+- [x] **Step 1: Write failing scheduler tests**
 
 Cover:
 
@@ -433,13 +433,13 @@ Cover:
 - Scheduler normalizes Unix cron day-of-week before creating APScheduler triggers.
 - A schedule using `0` or `7` for Sunday creates the same next run as `sun`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `python -m pytest tests/test_scheduler.py -v`
 
 Expected: FAIL with missing `krakendca.scheduler`.
 
-- [ ] **Step 3: Implement scheduler service**
+- [x] **Step 3: Implement scheduler service**
 
 Implement `krakendca/scheduler.py` with a `SchedulerService` class.
 
@@ -492,13 +492,13 @@ Job status contract:
 }
 ```
 
-- [ ] **Step 4: Run scheduler tests**
+- [x] **Step 4: Run scheduler tests**
 
 Run: `python -m pytest tests/test_scheduler.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add krakendca/scheduler.py tests/test_scheduler.py
@@ -519,7 +519,7 @@ git commit -m "feat: add in-process DCA scheduler"
 - Create: `tests/test_web_auth.py`
 - Create: `tests/test_web_api.py`
 
-- [ ] **Step 1: Write failing auth tests**
+- [x] **Step 1: Write failing auth tests**
 
 Cover:
 
@@ -535,7 +535,7 @@ Cover:
 - Unsafe methods reject missing or invalid `X-CSRF-Token`.
 - Logout clears session.
 
-- [ ] **Step 2: Write failing API tests**
+- [x] **Step 2: Write failing API tests**
 
 Cover:
 
@@ -578,17 +578,17 @@ Cover:
 - Manual run `history_persistence_failed` returns `500` with code `history_persistence_failed`.
 - Manual run `kraken_error` returns `502` with code `kraken_error`.
 
-- [ ] **Step 3: Run web tests and verify failure**
+- [x] **Step 3: Run web tests and verify failure**
 
 Run: `python -m pytest tests/test_web_auth.py tests/test_web_api.py -v`
 
 Expected: FAIL with missing `krakendca.web`.
 
-- [ ] **Step 4: Implement auth module**
+- [x] **Step 4: Implement auth module**
 
 Use `itsdangerous.URLSafeTimedSerializer` for signed cookies and `secrets.compare_digest` for password checks. Keep cookie name `kraken_dca_session`. Return a fresh CSRF token from both `POST /api/session` and `GET /api/session`. Include cookie attribute handling for `HttpOnly`, `SameSite=Strict`, 12-hour max age, optional `Secure`, and optional `WEB_UI_SESSION_SECRET`.
 
-- [ ] **Step 5: Implement response schemas and error mapping**
+- [x] **Step 5: Implement response schemas and error mapping**
 
 Implement `krakendca/web/schemas.py` with helpers for:
 
@@ -597,7 +597,7 @@ Implement `krakendca/web/schemas.py` with helpers for:
 - Field validation error payloads.
 - `RunResult` to HTTP status mapping.
 
-- [ ] **Step 6: Implement app factory and lifespan**
+- [x] **Step 6: Implement app factory and lifespan**
 
 Implement `create_app(config_path: str = "/app/config.yaml", static_dir: str = "/app/frontend") -> FastAPI`.
 
@@ -616,29 +616,29 @@ Use FastAPI lifespan startup/shutdown hooks:
 - Start `SchedulerService` only when config is valid.
 - On shutdown, stop `SchedulerService` cleanly.
 
-- [ ] **Step 7: Implement session route module**
+- [x] **Step 7: Implement session route module**
 
 Add `krakendca/web/routes_session.py` with `GET /api/session`, `POST /api/session`, and `DELETE /api/session` using `krakendca.web.auth`.
 
-- [ ] **Step 8: Implement config route module**
+- [x] **Step 8: Implement config route module**
 
 Add `krakendca/web/routes_config.py` with `GET /api/config` and `PUT /api/config` using `config_store`. Include setup mode, semantic-invalid degraded mode, malformed YAML degraded mode, redaction, secret metadata, env credential `null` values, save, and reload-failure response handling.
 
-- [ ] **Step 9: Implement scheduler and manual-run route module**
+- [x] **Step 9: Implement scheduler and manual-run route module**
 
 Add `krakendca/web/routes_scheduler.py` with `GET /api/scheduler`, `POST /api/scheduler/reload`, and `POST /api/pairs/{pair}/run`. Map scheduler conflicts and runner outcomes to the documented status codes.
 
-- [ ] **Step 10: Implement static frontend serving module**
+- [x] **Step 10: Implement static frontend serving module**
 
 Add `krakendca/web/static.py`. Mount static frontend assets only after API routes. Return `index.html` for authenticated SPA routes and login shell for unauthenticated users.
 
-- [ ] **Step 11: Run web tests**
+- [x] **Step 11: Run web tests**
 
 Run: `python -m pytest tests/test_web_auth.py tests/test_web_api.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add krakendca/web tests/test_web_auth.py tests/test_web_api.py
