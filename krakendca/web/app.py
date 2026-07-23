@@ -67,7 +67,7 @@ def create_app(
     @app.middleware("http")
     async def refresh_authenticated_session(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path != "/api/session":
+        if request.url.path != "/api/session" and 200 <= response.status_code < 400:
             session = getattr(request.state, "authenticated_session", None)
             if session is not None:
                 auth.set_session_cookie(

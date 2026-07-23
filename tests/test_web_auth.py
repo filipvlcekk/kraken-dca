@@ -162,6 +162,26 @@ def test_login_rejects_malformed_json_with_api_envelope(tmp_path, monkeypatch) -
     assert response.json()["error"]["code"] == "validation_error"
 
 
+def test_login_rejects_invalid_utf8_json_with_api_envelope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    app = create_app(config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/session",
+            content=b"\xff",
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["ok"] is False
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_login_rejects_non_object_json_with_api_envelope(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     app = create_app(config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path))
@@ -224,6 +244,25 @@ def test_authenticated_api_request_refreshes_session_cookie_without_rotating_csr
         max_age=auth.SESSION_MAX_AGE_SECONDS,
     )
     assert refreshed["csrf_token"] == csrf_token
+
+
+def test_failed_csrf_request_does_not_refresh_session_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    app = create_app(config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path))
+
+    with TestClient(app) as client:
+        login = client.post("/api/session", json={"password": "secret"})
+        assert login.status_code == 200
+        response = client.post(
+            "/api/scheduler/reload",
+            headers={"X-CSRF-Token": "invalid"},
+        )
+
+    assert response.status_code == 403
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
 
 
 def test_logout_clears_session_cookie(tmp_path, monkeypatch) -> None:

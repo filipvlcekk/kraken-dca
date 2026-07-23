@@ -52,7 +52,7 @@ def error_response(
 async def json_object_body(request: Request) -> dict[str, Any]:
     try:
         payload = await request.json()
-    except JSONDecodeError as exc:
+    except (JSONDecodeError, UnicodeDecodeError) as exc:
         raise ApiException(
             400,
             "validation_error",

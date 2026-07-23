@@ -240,6 +240,33 @@ def test_malformed_yaml_enters_degraded_mode_without_secrets(
     assert FakeSchedulerService.instances == []
 
 
+def test_invalid_utf8_config_enters_degraded_mode_without_leaking_bytes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_bytes(b"api:\n  private_key: \xff\n")
+    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+
+    with TestClient(app) as client:
+        login = client.post("/api/session", json={"password": "secret"})
+        response = client.get("/api/config")
+        scheduler_response = client.get("/api/scheduler")
+
+    assert login.status_code == 200
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["config_valid"] is False
+    assert data["config"] == {}
+    assert data["raw_yaml"] is None
+    assert data["validation_errors"] == {"config": "Config YAML is malformed."}
+    assert "\\ufffd" not in json.dumps(response.json())
+    assert scheduler_response.status_code == 200
+    assert scheduler_response.json()["data"]["running"] is False
+    assert FakeSchedulerService.instances == []
+
+
 def test_malformed_yaml_does_not_leak_secret_text_in_degraded_config_response(
     authed_client,
 ) -> None:
@@ -327,6 +354,21 @@ def test_put_config_rejects_malformed_json_with_api_envelope(authed_client) -> N
     assert response.json()["error"]["code"] == "validation_error"
 
 
+def test_put_config_rejects_invalid_utf8_json_with_api_envelope(authed_client) -> None:
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.put(
+        "/api/config",
+        content=b"\xff",
+        headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["ok"] is False
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_put_config_rejects_non_object_json_with_api_envelope(authed_client) -> None:
     client, _path, csrf = authed_client(valid_config())
 
@@ -408,6 +450,28 @@ def test_put_config_malformed_existing_yaml_error_does_not_leak_secret(
     body = response.json()
     assert body["error"]["code"] == "validation_error"
     assert secret not in json.dumps(body)
+
+
+def test_put_config_invalid_utf8_existing_config_returns_validation_error(
+    authed_client,
+) -> None:
+    client, path, csrf = authed_client()
+    with open(path, "wb") as config_file:
+        config_file.write(b"api:\n  private_key: \xff\n")
+
+    response = client.put(
+        "/api/config",
+        json={"config": valid_config()},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert body["error"]["fields"] == {
+        "config": "Existing config YAML is malformed.",
+    }
+    assert "\\ufffd" not in json.dumps(body)
 
 
 def test_put_config_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:
@@ -504,6 +568,33 @@ def test_reload_malformed_yaml_error_does_not_leak_secret(authed_client) -> None
     body = response.json()
     assert body["error"]["code"] == "validation_error"
     assert secret not in json.dumps(body)
+
+
+def test_reload_invalid_utf8_config_returns_validation_error_without_leaking_bytes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_bytes(b"api:\n  private_key: \xff\n")
+    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+
+    with TestClient(app) as client:
+        login = client.post("/api/session", json={"password": "secret"})
+        csrf = login.json()["data"]["csrf_token"]
+        response = client.post(
+            "/api/scheduler/reload",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert login.status_code == 200
+    assert response.status_code == 400
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "validation_error"
+    assert body["error"]["fields"] == {"config": "Config YAML is malformed."}
+    assert "\\ufffd" not in json.dumps(body)
+    assert FakeSchedulerService.instances == []
 
 
 def test_reload_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:

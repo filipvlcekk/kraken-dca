@@ -34,8 +34,11 @@ class ConfigValidationError(ValueError):
 
 def load_config(path: str) -> dict:
     """Load YAML config from path, returning an empty dict for empty YAML."""
-    with open(path, "r") as stream:
-        return yaml.load(stream, Loader=yaml.SafeLoader) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            return yaml.load(stream, Loader=yaml.SafeLoader) or {}
+    except UnicodeDecodeError as exc:
+        raise yaml.YAMLError("Config YAML is malformed.") from exc
 
 
 def validate_config(config: dict, env: dict | None = None) -> dict:
