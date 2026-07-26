@@ -659,7 +659,7 @@ git commit -m "feat: add authenticated web API"
 - Create: `frontend/src/App.vue`
 - Create: `frontend/src/style.css`
 
-- [ ] **Step 1: Scaffold Vue 3 + Vite + TypeScript**
+- [x] **Step 1: Scaffold Vue 3 + Vite + TypeScript**
 
 Use pinned Vite Vue template.
 
@@ -671,7 +671,7 @@ Run: `npm --prefix frontend install --save-dev @vitejs/plugin-vue@5.2.1 vite@6.0
 
 Pin generated package versions in `frontend/package-lock.json`.
 
-- [ ] **Step 2: Configure frontend test scripts**
+- [x] **Step 2: Configure frontend test scripts**
 
 Ensure `frontend/package.json` contains:
 
@@ -686,7 +686,7 @@ Ensure `frontend/package.json` contains:
 
 Configure Vitest with jsdom in `frontend/vite.config.ts`.
 
-- [ ] **Step 3: Run empty frontend checks**
+- [x] **Step 3: Run empty frontend checks**
 
 Run: `npm --prefix frontend test -- --run`
 
@@ -696,7 +696,7 @@ Run: `npm --prefix frontend run build`
 
 Expected: PASS and output in `frontend/dist`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend
