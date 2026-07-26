@@ -711,7 +711,7 @@ git commit -m "chore: scaffold Vue frontend"
 - Create: `frontend/src/__tests__/schedule.test.ts`
 - Create: `frontend/src/__tests__/api.test.ts`
 
-- [ ] **Step 1: Write failing API and schedule tests**
+- [x] **Step 1: Write failing API and schedule tests**
 
 Cover:
 
@@ -737,7 +737,7 @@ Run: `npm --prefix frontend test -- --run`
 
 Expected: FAIL until `api.ts` and `schedule.ts` are implemented.
 
-- [ ] **Step 2: Implement API client**
+- [x] **Step 2: Implement API client**
 
 Define response types matching backend `ok/data/error` shapes. Add typed API helpers for session restore, login, logout, config load/save, scheduler reload, scheduler status, and manual run.
 
@@ -760,7 +760,7 @@ Export these TypeScript types and functions:
 - `reloadScheduler(csrfToken: string)`.
 - `runPairNow(pair: string, csrfToken: string)`.
 
-- [ ] **Step 3: Implement schedule helpers**
+- [x] **Step 3: Implement schedule helpers**
 
 Implement `frontend/src/schedule.ts`:
 
@@ -782,13 +782,13 @@ Export these functions:
 - `previewNextRuns(cron: string, timezone: string, count?: number): string[]`.
 - `cronRunsMoreFrequentlyThan(cron: string, timezone: string, minIntervalMinutes: number): boolean`.
 
-- [ ] **Step 4: Run API and schedule tests**
+- [x] **Step 4: Run API and schedule tests**
 
 Run: `npm --prefix frontend test -- --run frontend/src/__tests__/api.test.ts frontend/src/__tests__/schedule.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/api.ts frontend/src/authStore.ts frontend/src/schedule.ts frontend/src/__tests__/api.test.ts frontend/src/__tests__/schedule.test.ts
