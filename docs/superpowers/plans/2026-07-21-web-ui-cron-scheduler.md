@@ -873,7 +873,7 @@ git commit -m "feat: add frontend config editing"
 - Create: `frontend/src/__tests__/scheduleEditor.test.ts`
 - Create: `frontend/src/__tests__/pairEditor.test.ts`
 
-- [ ] **Step 1: Write failing scheduler and pair UI tests**
+- [x] **Step 1: Write failing scheduler and pair UI tests**
 
 Cover:
 
@@ -886,18 +886,18 @@ Run: `npm --prefix frontend test -- --run frontend/src/__tests__/schedulerStatus
 
 Expected: FAIL until scheduler store and pair UI components exist.
 
-- [ ] **Step 2: Implement scheduler store**
+- [x] **Step 2: Implement scheduler store**
 
 Implement `schedulerStore.ts` with methods `loadStatus`, `reload`, and `runPairNow(pair)`.
 
-- [ ] **Step 3: Implement scheduler status component**
+- [x] **Step 3: Implement scheduler status component**
 
 Implement `SchedulerStatus.vue` props:
 
 - `status`.
 - `onReload`.
 
-- [ ] **Step 4: Implement schedule editor component**
+- [x] **Step 4: Implement schedule editor component**
 
 Implement `ScheduleEditor.vue` props and events:
 
@@ -905,7 +905,7 @@ Implement `ScheduleEditor.vue` props and events:
 - Emits: `update:schedule`, `update:minOrderIntervalMinutes`.
 - Behavior: preset mode, advanced mode, summary, next runs, min-interval warning.
 
-- [ ] **Step 5: Implement pair editor component**
+- [x] **Step 5: Implement pair editor component**
 
 Implement `PairEditor.vue` props and events:
 
@@ -914,13 +914,13 @@ Implement `PairEditor.vue` props and events:
 
 Pair add behavior lives in `configStore.ts`; the app shell should expose an "Add pair" action that calls the store and includes the new pair in the next full config save.
 
-- [ ] **Step 6: Run scheduler and pair UI tests**
+- [x] **Step 6: Run scheduler and pair UI tests**
 
 Run: `npm --prefix frontend test -- --run frontend/src/__tests__/schedulerStatus.test.ts frontend/src/__tests__/scheduleEditor.test.ts frontend/src/__tests__/pairEditor.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/schedulerStore.ts frontend/src/components/SchedulerStatus.vue frontend/src/components/ScheduleEditor.vue frontend/src/components/PairEditor.vue frontend/src/__tests__/schedulerStatus.test.ts frontend/src/__tests__/scheduleEditor.test.ts frontend/src/__tests__/pairEditor.test.ts
