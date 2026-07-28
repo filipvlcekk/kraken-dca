@@ -1018,7 +1018,7 @@ git commit -m "fix: stabilize frontend checks"
 - Modify: `tests/fixtures/config.yaml`
 - Create: `tests/test_docker_runtime.py`
 
-- [ ] **Step 1: Write failing docs/runtime tests**
+- [x] **Step 1: Write failing docs/runtime tests**
 
 Add tests that assert:
 
@@ -1043,13 +1043,13 @@ Add tests that assert:
 - `config-sample.yaml` includes schedule examples.
 - `tests/fixtures/config.yaml` stays equal to `config-sample.yaml`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `python -m pytest tests/test_docker_runtime.py tests/test_config.py::test_default_config_file_is_correct -v`
 
 Expected: FAIL until Dockerfile, README, and sample config are updated.
 
-- [ ] **Step 3: Update Dockerfile**
+- [x] **Step 3: Update Dockerfile**
 
 Use multi-stage build:
 
@@ -1063,7 +1063,7 @@ Use multi-stage build:
 - Runtime command is single worker Uvicorn.
 - Remove system cron installation and crontab setup from the default web runtime image.
 
-- [ ] **Step 4: Update README**
+- [x] **Step 4: Update README**
 
 Document:
 
@@ -1079,7 +1079,7 @@ Document:
 - Legacy `delay` fallback.
 - Manual run and scheduler reload behavior.
 
-- [ ] **Step 5: Update sample config and fixture**
+- [x] **Step 5: Update sample config and fixture**
 
 Update `config-sample.yaml` and `tests/fixtures/config.yaml` with:
 
@@ -1087,19 +1087,21 @@ Update `config-sample.yaml` and `tests/fixtures/config.yaml` with:
 - One disabled scheduled pair containing `schedule.enabled: false`.
 - One legacy example or commented docs showing `delay` fallback behavior.
 
-- [ ] **Step 6: Run backend and docs tests**
+- [x] **Step 6: Run backend and docs tests**
 
 Run: `python -m pytest tests/test_docker_runtime.py tests/test_config.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Build Docker image**
+- [x] **Step 7: Build Docker image**
 
 Run: `docker build -t kraken-dca:web-ui .`
 
 Expected: PASS.
 
-- [ ] **Step 8: Verify Docker container serves the web UI**
+Verified through Coolify deployment `hovsz66p71fghsg8x8nfcmod` because local Docker CLI was unavailable in this workspace.
+
+- [x] **Step 8: Verify Docker container serves the web UI**
 
 Run: `docker run --rm -d --name kraken-dca-web-ui-test -e WEB_UI_PASSWORD=test -p 18080:8080 kraken-dca:web-ui`
 
@@ -1131,7 +1133,7 @@ Run: `docker stop kraken-dca-web-ui-test`
 
 Expected: stops the container.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add Dockerfile README.md config-sample.yaml tests/fixtures/config.yaml tests/test_docker_runtime.py
