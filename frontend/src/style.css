@@ -1,10 +1,20 @@
 :root {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-body: 'Avenir Next', 'Gill Sans', 'Trebuchet MS', sans-serif;
+  --font-display: 'Iowan Old Style', Palatino, 'Book Antiqua', serif;
+  --color-ink: #202519;
+  --color-muted: #4d563c;
+  --color-rust: #8c4f1f;
+  --color-danger: #92351f;
+  --color-field: #fffaf0;
+  --color-field-border: rgba(42, 50, 32, 0.18);
+
+  font-family: var(--font-body);
   line-height: 1.5;
   font-weight: 400;
-  color: #202519;
+  color: var(--color-ink);
   background:
     radial-gradient(circle at 18% 20%, rgba(245, 137, 47, 0.28), transparent 28rem),
+    radial-gradient(circle at 50% 100%, rgba(35, 49, 31, 0.15), transparent 28rem),
     radial-gradient(circle at 92% 8%, rgba(92, 122, 63, 0.18), transparent 24rem),
     linear-gradient(135deg, #fbf3df 0%, #f2dfb4 48%, #d8e2bb 100%);
 
@@ -24,9 +34,45 @@ body {
   min-height: 100vh;
 }
 
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.72rem 1rem;
+  background: #23311f;
+  color: #fff5df;
+  cursor: pointer;
+  font-weight: 850;
+  box-shadow: 0 12px 28px rgba(35, 49, 31, 0.18);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+input,
+select {
+  min-width: 0;
+  border: 1px solid var(--color-field-border);
+  border-radius: 14px;
+  padding: 0.68rem 0.78rem;
+  background: var(--color-field);
+  color: var(--color-ink);
+}
+
+code {
+  border-radius: 0.4rem;
+  padding: 0.12rem 0.34rem;
+  background: rgba(35, 49, 31, 0.1);
+}
+
 #app {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
   padding: clamp(1rem, 4vw, 3rem);
 }
