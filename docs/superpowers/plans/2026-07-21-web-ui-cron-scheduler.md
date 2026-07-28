@@ -985,19 +985,19 @@ git commit -m "feat: add frontend app shell"
 **Files:**
 - No planned edits unless frontend verification reveals a bug.
 
-- [ ] **Step 1: Run all frontend tests**
+- [x] **Step 1: Run all frontend tests**
 
 Run: `npm --prefix frontend test -- --run`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend build**
+- [x] **Step 2: Run frontend build**
 
 Run: `npm --prefix frontend run build`
 
 Expected: PASS and output in `frontend/dist`.
 
-- [ ] **Step 3: Commit frontend verification fixes if needed**
+- [x] **Step 3: Commit frontend verification fixes if needed**
 
 Only commit if verification required source or test changes:
 
