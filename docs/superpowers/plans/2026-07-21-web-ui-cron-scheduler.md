@@ -805,7 +805,7 @@ git commit -m "feat: add frontend API and schedule helpers"
 - Create: `frontend/src/__tests__/configStore.test.ts`
 - Create: `frontend/src/__tests__/configWarnings.test.ts`
 
-- [ ] **Step 1: Write failing config and credential tests**
+- [x] **Step 1: Write failing config and credential tests**
 
 Cover:
 
@@ -827,11 +827,11 @@ Run: `npm --prefix frontend test -- --run`
 
 Expected: FAIL until config store and components exist.
 
-- [ ] **Step 2: Implement config store**
+- [x] **Step 2: Implement config store**
 
 Implement `configStore.ts` for config loading, editing, add pair, remove pair, validation errors, dirty state, redacted credential replacement state, env-backed credential omission, explicit `schedule.enabled`, and save lifecycle.
 
-- [ ] **Step 3: Implement credential editor**
+- [x] **Step 3: Implement credential editor**
 
 Implement `CredentialEditor.vue` props and events:
 
@@ -839,7 +839,7 @@ Implement `CredentialEditor.vue` props and events:
 - Emits: `replace-public-key`, `replace-private-key`, `clear-file-public-key`, `clear-file-private-key`.
 - Behavior: display source/status, keep redacted values untouched until explicit replacement.
 
-- [ ] **Step 4: Implement config warnings**
+- [x] **Step 4: Implement config warnings**
 
 Implement `ConfigWarnings.vue` props:
 
@@ -849,13 +849,13 @@ Implement `ConfigWarnings.vue` props:
 - `orderHistoryWarning`.
 - `setupMode`.
 
-- [ ] **Step 5: Run config and credential tests**
+- [x] **Step 5: Run config and credential tests**
 
 Run: `npm --prefix frontend test -- --run frontend/src/__tests__/configStore.test.ts frontend/src/__tests__/credentialEditor.test.ts frontend/src/__tests__/configWarnings.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/configStore.ts frontend/src/components/CredentialEditor.vue frontend/src/components/ConfigWarnings.vue frontend/src/__tests__/configStore.test.ts frontend/src/__tests__/credentialEditor.test.ts frontend/src/__tests__/configWarnings.test.ts
