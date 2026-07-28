@@ -18,6 +18,26 @@ def get_config() -> str:
     return config
 
 
+def get_legacy_config() -> str:
+    """Return a legacy delay-only config for CLI Config tests."""
+    return """
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+
+dca_pairs:
+  - pair: "XETHZEUR"
+    delay: 1
+    amount: 15
+    limit_factor: 0.985
+    max_price: 2900.10
+  - pair: "XXBTZEUR"
+    delay: 3
+    amount: 20
+    ignore_differing_orders: True
+"""
+
+
 def test_default_config_file_is_correct() -> None:
     """Test if config.yaml has changed."""
     correct_config: str = get_config()
@@ -55,7 +75,7 @@ def assert_dca_pair(
 
 def test_config_properties() -> None:
     # Test object properties are correctly assigned.
-    config = Config("config-sample.yaml")
+    config = mock_config(get_legacy_config())
     assert type(config.api_public_key) == str
     assert config.api_public_key == "KRAKEN_API_PUBLIC_KEY"
     assert type(config.api_private_key) == str
@@ -108,7 +128,7 @@ class TestConfig:
 
     def setup_method(self) -> None:
         """Load test config.yaml file."""
-        self.config = get_config()
+        self.config = get_legacy_config()
 
     def test_raise_file_not_found_error(self) -> None:
         """Test raise FileNotFoundError."""

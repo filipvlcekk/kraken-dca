@@ -87,51 +87,60 @@ Order history is by default saved in *orders.csv* in Kraken-DCA base directory,
 the output file can be changed through docker image execution as described below.
 
 # 🔨 Configuration
-Configuration is done through a yaml file.
-If you don't use docker you must create a *config.yaml* file. It may be
-copied from *config-sample.yaml* and adjusted to your requirements.
+Configuration is done through a yaml file. In Docker web UI mode the container can
+start without an existing `config.yaml`; the web UI enters setup mode and lets you
+create one. For local or legacy CLI usage, copy *config-sample.yaml* to
+*config.yaml* and adjust it to your requirements.
 
 ```yaml
 # Kraken's API public and private keys.
+# You can omit this section when KRAKEN_API_PUBLIC_KEY and
+# KRAKEN_API_PRIVATE_KEY are supplied through the environment.
 api:
   public_key: "KRAKEN_API_PUBLIC_KEY"
   private_key: "KRAKEN_API_PRIVATE_KEY"
 
 # DCA pairs configuration. You can add as many pairs as you want.
 # pair: Name of the pair (list of available pairs: https://api.kraken.com/0/public/AssetPairs)
-# delay: Delay in days between each buy limit order.
 # amount: Amount of the order in quote asset.
-# limit_factor (optional): Create the limit order at a price of current price
-#                          multiplied by specified factor (up to 5 digits).
-# max_price (optional): Maximum price to create a limit order, after looking at
-#                       limit_factor if set (up to 2 digits).
-# ignore_differing_orders (optional): May be set to True to ignore any set open or
-#                          closed orders within the time delay that differ more than 1%
-#                          tin the desired amount. This allows to have manually set
-#                          limit orders while still DCAing.
-# E.g., limit_factor = 0.95 creates a limit order 5% below market price
+# schedule.enabled: Enables or disables web scheduler execution for this pair.
+# schedule.cron: Five-field Unix cron expression.
+# schedule.timezone: IANA timezone used to evaluate the cron expression.
+# min_order_interval_minutes: Safety interval for cron/manual runs.
+# delay: Legacy CLI/cron fallback in days. Web cron schedules take precedence.
 dca_pairs:
   - pair: "XETHZEUR"
-    delay: 1
     amount: 15
+    schedule:
+      enabled: true
+      cron: "0 9 * * *"
+      timezone: "Europe/Prague"
+    min_order_interval_minutes: 30
     limit_factor: 0.985
     max_price: 2900.10
   - pair: "XXBTZEUR"
-    delay: 3
     amount: 20
+    schedule:
+      enabled: false
+    delay: 3
     ignore_differing_orders: True
+  - pair: "XLTCZEUR"
+    delay: 7
+    amount: 10
 ```
 - In api, public_key and private_key correspond to your Kraken API key information.
-- Delay is the number of days between buy orders. Set to 1 to DCA each day, 7 once per week.
 - Available pairs for pair field can be found [here](https://api.kraken.com/0/public/AssetPairs) on *altname*.
 - Amount is the amount of quote asset to sell to buy base asset.
-- You can specify as many pairs as you want in the dca_pairs list.
-- Set a `limit_factor` if you want to place the buy order that is different from the 
+- `schedule:` configures the Docker web scheduler for a pair. `schedule.cron` must be a five-field Unix cron expression and `schedule.timezone` should be an IANA timezone such as `Europe/Prague` or `UTC`.
+- `min_order_interval_minutes` prevents cron/manual runs from submitting too frequently for the same pair. The default is 30 minutes.
+- Use `schedule.enabled: false` to keep a pair in the config without scheduling it.
+- The legacy `delay` value is still supported for the old CLI/cron mode and acts as a fallback when no enabled web schedule is present.
+- Set a `limit_factor` if you want to place the buy order that is different from the
   current market price (up to 5 digits).<br>
   E.g., `limit_factor: 0.95` would set the limit price 5% below the market price.
-- Set a `max_price` if you want to define a maximum price in quote pair to create a 
+- Set a `max_price` if you want to define a maximum price in quote pair to create a
   limit buy order (after using `limit_factor` if defined).
-- Set `ignore_differing_orders` to `True` to ignore orders within the time delay that 
+- Set `ignore_differing_orders` to `True` to ignore orders within the time delay that
   differ more than 1% in the desired amount. This allows to have manually set limit
   orders while still DCAing.
 
@@ -143,25 +152,45 @@ You can download the image directly from [Docker Hub](https://hub.docker.com/) u
 ```sh
 docker pull futurbroke/kraken-dca:latest
 ```
-The program is executed every hour as a cron job in a container and now runs as an unprivileged user.<br>
-You must provide an empty order history CSV file at first launch and make sure it is writable by the container user (`uid 10001`, `gid 10001`). You can create one on Unix systems using:
+The default Docker runtime runs the web UI and scheduler in one container on port
+8080. The container runs as an unprivileged user (`uid 10001`, `gid 10001`) and
+requires `WEB_UI_PASSWORD` for browser login.
+
+Create writable files on the host if you want persistent config and order history:
 ```sh
+touch config.yaml
 touch orders.csv
+chown 10001:10001 config.yaml
 chown 10001:10001 orders.csv
 ```
-To start the container with restart as system reboot use:
+To start the Docker web UI use:
 ```sh
-docker run -v CONFIGURATION_FILE_PATH:/app/config.yaml \
- -v ORDERS_FILE_PATH:/app/orders.csv \
- --env TZ=UTC \
- --name kraken-dca \
- --restart=on-failure futurbroke/kraken-dca
+docker run -p 8080:8080 \
+  -v CONFIGURATION_FILE_PATH:/app/config.yaml \
+  -v ORDERS_FILE_PATH:/app/orders.csv \
+  -e WEB_UI_PASSWORD=change-me \
+  -e TZ=UTC \
+  --name kraken-dca \
+  --restart=on-failure \
+  futurbroke/kraken-dca
 ```
-- **CONFIGURATION_FILE_PATH**: Configuration folder filepath (e.g., *~/dev/config.yaml*). Mount it read-only when possible (`CONFIGURATION_FILE_PATH:/app/config.yaml:ro`).
-- **ORDERS_FILE_PATH**: Order history CSV filepath (e.g., *~/dev/orders.csv*).
+- **CONFIGURATION_FILE_PATH**: writable `config.yaml` filepath (e.g., *~/dev/config.yaml*). Web UI mode writes this file, so do not mount it read-only.
+- **ORDERS_FILE_PATH**: writable `orders.csv` order history filepath (e.g., *~/dev/orders.csv*).
+- **WEB_UI_PASSWORD**: Required password for the browser UI.
+- **WEB_UI_SESSION_SECRET**: Optional signing secret for sessions. If omitted, `WEB_UI_PASSWORD` is used.
+- **WEB_UI_COOKIE_SECURE**: Optional. Set to `true` when serving the UI through HTTPS.
 - **TZ**: Recommended timezone for deterministic cron scheduling and logs.
 
 Prefer supplying Kraken credentials through a mounted `config.yaml` that is generated from your secret store or environment outside the repository, rather than committing secrets into version control.
+
+Manual run actions execute one configured pair immediately through the same safety
+checks as scheduled jobs. A save through the web UI writes the full config and
+triggers a scheduler reload; if the reload fails, the UI reports the error and the
+old active scheduler state is kept.
+
+For legacy CLI/cron mode only, you can mount `config.yaml` read-only and run your
+own external cron. That read-only guidance does not apply to Docker web UI mode,
+because the web UI must be able to persist configuration changes.
 
 To see container logs:
 ```sh
