@@ -17,6 +17,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN set -eux; \
+    apt-get update; \
+    apt-get install --yes --no-install-recommends curl; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
     groupadd --gid 10001 krakendca; \
     useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin krakendca
 
