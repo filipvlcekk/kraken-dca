@@ -937,7 +937,7 @@ git commit -m "feat: add frontend scheduler controls"
 - Create: `frontend/src/__tests__/loginView.test.ts`
 - Create: `frontend/src/__tests__/app.test.ts`
 
-- [ ] **Step 1: Write failing auth shell tests**
+- [x] **Step 1: Write failing auth shell tests**
 
 Cover:
 
@@ -951,29 +951,29 @@ Run: `npm --prefix frontend test -- --run frontend/src/__tests__/loginView.test.
 
 Expected: FAIL until auth shell components exist.
 
-- [ ] **Step 2: Implement auth store**
+- [x] **Step 2: Implement auth store**
 
 Implement `authStore.ts` for CSRF restoration, login, logout, and authenticated state.
 
-- [ ] **Step 3: Implement login component**
+- [x] **Step 3: Implement login component**
 
 Implement `LoginView.vue` for password auth and failed-login state.
 
-- [ ] **Step 4: Compose authenticated app shell**
+- [x] **Step 4: Compose authenticated app shell**
 
 Implement `App.vue` for high-level composition only: choose login vs authenticated shell and wire store-backed components together.
 
-- [ ] **Step 5: Add intentional visual design**
+- [x] **Step 5: Add intentional visual design**
 
 Use custom CSS variables, a non-default typography stack, strong information hierarchy, responsive pair cards, and a clear warning style for trading-sensitive actions. Do not add a heavy UI component library.
 
-- [ ] **Step 6: Run auth shell tests**
+- [x] **Step 6: Run auth shell tests**
 
 Run: `npm --prefix frontend test -- --run frontend/src/__tests__/loginView.test.ts frontend/src/__tests__/app.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/authStore.ts frontend/src/components/LoginView.vue frontend/src/App.vue frontend/src/style.css frontend/src/__tests__/loginView.test.ts frontend/src/__tests__/app.test.ts
