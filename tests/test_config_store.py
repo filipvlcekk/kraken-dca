@@ -34,13 +34,13 @@ def valid_config() -> dict:
     }
 
 
-def test_loads_legacy_delay_config() -> None:
+def test_loads_sample_config() -> None:
     config = validate_config(load_config("config-sample.yaml"))
 
     assert config["api"]["public_key"] == "KRAKEN_API_PUBLIC_KEY"
     assert config["api"]["private_key"] == "KRAKEN_API_PRIVATE_KEY"
-    assert len(config["dca_pairs"]) == 2
-    assert config["dca_pairs"][0]["delay"] == 1
+    assert len(config["dca_pairs"]) == 3
+    assert config["dca_pairs"][0]["schedule"]["cron"] == "0 9 * * *"
     assert config["dca_pairs"][0]["amount"] == 15.0
 
 
@@ -69,6 +69,54 @@ def test_rejects_duplicate_pair_names() -> None:
     assert exc_info.value.fields == {
         "dca_pairs.1.pair": "Duplicate DCA pair specified."
     }
+
+
+def test_rejects_non_string_pair_without_type_error() -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["pair"] = ["XETHZEUR"]
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config)
+
+    assert exc_info.value.fields == {
+        "dca_pairs.0.pair": "Pair must be a non-empty string."
+    }
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "field"),
+    [
+        ("top-level", "/tmp/orders.csv", "orders_filepath"),
+        ("pair", "../orders.csv", "dca_pairs.0.orders_filepath"),
+        ("pair", "nested/orders.csv", "dca_pairs.0.orders_filepath"),
+        ("pair", "orders.txt", "dca_pairs.0.orders_filepath"),
+        ("pair", 42, "dca_pairs.0.orders_filepath"),
+    ],
+)
+def test_rejects_unsafe_orders_filepath(target: str, value: object, field: str) -> None:
+    config = valid_config()
+    if target == "top-level":
+        config["orders_filepath"] = value
+    else:
+        config["dca_pairs"][0]["orders_filepath"] = value
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config)
+
+    assert exc_info.value.fields == {
+        field: "orders_filepath must be a relative CSV filename without directories."
+    }
+
+
+def test_preserves_safe_orders_filepath() -> None:
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    config["dca_pairs"][0]["orders_filepath"] = "xeth_orders.csv"
+
+    normalized = validate_config(config)
+
+    assert normalized["orders_filepath"] == "orders.csv"
+    assert normalized["dca_pairs"][0]["orders_filepath"] == "xeth_orders.csv"
 
 
 def test_rejects_invalid_cron_with_field_path() -> None:
@@ -192,6 +240,19 @@ def test_preserves_redacted_credentials_on_save(tmp_path) -> None:
     assert saved["api"]["private_key"] == "FILE_PRIVATE_KEY"
     assert saved["dca_pairs"][0]["amount"] == 25.0
     assert REDACTED_SECRET not in path.read_text(encoding="utf-8")
+
+
+def test_save_config_strips_unknown_config_keys(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    submitted = valid_config()
+    submitted["unexpected"] = "drop me"
+    submitted["dca_pairs"][0]["unexpected"] = "drop me too"
+
+    save_config(str(path), submitted)
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert "unexpected" not in saved
+    assert "unexpected" not in saved["dca_pairs"][0]
 
 
 def test_replaces_redacted_credentials_when_new_strings_are_submitted(

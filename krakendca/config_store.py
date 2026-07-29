@@ -22,6 +22,9 @@ _PRIVATE_ENV_VAR = "KRAKEN_API_PRIVATE_KEY"
 _MIN_ORDER_INTERVAL_DEFAULT = 30
 _MIN_ORDER_INTERVAL_MAX = 525600
 _CLI_SCHEDULE_ERROR = "Cron schedules require web mode."
+_ORDERS_FILEPATH_ERROR = (
+    "orders_filepath must be a relative CSV filename without directories."
+)
 
 
 class ConfigValidationError(ValueError):
@@ -45,13 +48,20 @@ def validate_config(config: dict, env: dict | None = None) -> dict:
     """Validate config and return a normalized copy with defaults applied."""
     env_values = _env(env)
     source = config or {}
-    normalized = copy.deepcopy(source)
+    normalized: dict = {}
     fields: dict[str, str] = {}
 
     api = source.get("api") or {}
     if not isinstance(api, dict):
         api = {}
     normalized["api"] = _validate_api(api, env_values, fields)
+    if "orders_filepath" in source:
+        _validate_orders_filepath(
+            source.get("orders_filepath"),
+            "orders_filepath",
+            normalized,
+            fields,
+        )
 
     dca_pairs = source.get("dca_pairs")
     if not dca_pairs or type(dca_pairs) is not list:
@@ -257,18 +267,23 @@ def _validate_pair(
         )
         return {}
 
-    normalized_pair = copy.deepcopy(dca_pair)
+    normalized_pair: dict = {}
     pair_name = dca_pair.get("pair")
-    if not pair_name:
+    if pair_name is None or pair_name == "":
         fields[f"dca_pairs.{index}.pair"] = (
             "Please provide the pair to dollar cost average."
         )
+    elif not isinstance(pair_name, str):
+        fields[f"dca_pairs.{index}.pair"] = "Pair must be a non-empty string."
     elif pair_name in seen_pairs:
         fields[f"dca_pairs.{index}.pair"] = "Duplicate DCA pair specified."
     else:
         seen_pairs.add(pair_name)
+        normalized_pair["pair"] = pair_name
 
     if "schedule" in dca_pair:
+        if "delay" in dca_pair:
+            normalized_pair["delay"] = dca_pair.get("delay")
         _validate_pair_schedule(
             dca_pair.get("schedule"),
             index,
@@ -276,7 +291,7 @@ def _validate_pair(
             fields,
         )
     elif "delay" in dca_pair:
-        _validate_delay(dca_pair.get("delay"), index, fields)
+        _validate_delay(dca_pair.get("delay"), index, normalized_pair, fields)
     else:
         fields[f"dca_pairs.{index}.delay"] = (
             "Please set the DCA days delay as a number > 0."
@@ -286,15 +301,29 @@ def _validate_pair(
     _validate_min_order_interval(dca_pair, index, normalized_pair, fields)
     _validate_limit_factor(dca_pair, index, normalized_pair, fields)
     _validate_max_price(dca_pair, index, normalized_pair, fields)
-    _validate_ignore_differing_orders(dca_pair, index, fields)
+    _validate_ignore_differing_orders(dca_pair, index, normalized_pair, fields)
+    if "orders_filepath" in dca_pair:
+        _validate_orders_filepath(
+            dca_pair.get("orders_filepath"),
+            f"dca_pairs.{index}.orders_filepath",
+            normalized_pair,
+            fields,
+        )
     return normalized_pair
 
 
-def _validate_delay(delay: object, index: int, fields: dict[str, str]) -> None:
+def _validate_delay(
+    delay: object,
+    index: int,
+    normalized_pair: dict,
+    fields: dict[str, str],
+) -> None:
     if not delay or type(delay) is not int or delay <= 0:
         fields[f"dca_pairs.{index}.delay"] = (
             "Please set the DCA days delay as a number > 0."
         )
+        return
+    normalized_pair["delay"] = delay
 
 
 def _validate_pair_schedule(
@@ -402,6 +431,7 @@ def _validate_max_price(
 def _validate_ignore_differing_orders(
     dca_pair: dict,
     index: int,
+    normalized_pair: dict,
     fields: dict[str, str],
 ) -> None:
     if dca_pair.get("ignore_differing_orders"):
@@ -409,6 +439,36 @@ def _validate_ignore_differing_orders(
             fields[f"dca_pairs.{index}.ignore_differing_orders"] = (
                 "ignore_differing_orders must be a boolean."
             )
+            return
+        normalized_pair["ignore_differing_orders"] = dca_pair.get(
+            "ignore_differing_orders"
+        )
+
+
+def _validate_orders_filepath(
+    value: object,
+    field: str,
+    normalized: dict,
+    fields: dict[str, str],
+) -> None:
+    if not isinstance(value, str):
+        fields[field] = _ORDERS_FILEPATH_ERROR
+        return
+
+    filename = value.strip()
+    path = Path(filename)
+    if (
+        not filename
+        or filename != value
+        or "\\" in filename
+        or path.is_absolute()
+        or path.name != filename
+        or path.suffix.lower() != ".csv"
+    ):
+        fields[field] = _ORDERS_FILEPATH_ERROR
+        return
+
+    normalized["orders_filepath"] = filename
 
 
 def _config_for_yaml(config: dict) -> dict:

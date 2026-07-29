@@ -12,12 +12,15 @@ router = APIRouter(prefix="/api/session", tags=["session"])
 
 @router.post("")
 async def login(request: Request):
+    auth.require_login_allowed(request)
     payload = await json_object_body(request)
     password = payload.get("password")
     expected = request.app.state.web_ui_password
     if not isinstance(password, str) or not auth.verify_password(password, expected):
+        auth.record_login_failure(request)
         raise ApiException(401, "unauthenticated", "Invalid password.")
 
+    auth.record_login_success(request)
     csrf_token = auth.new_csrf_token()
     response = ok({"authenticated": True, "csrf_token": csrf_token})
     auth.set_session_cookie(request, response, csrf_token)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from hmac import compare_digest
+from threading import Lock
 from typing import Any, Mapping
 
 from fastapi import Request
@@ -16,6 +18,58 @@ from krakendca.web.schemas import ApiException
 COOKIE_NAME = "kraken_dca_session"
 SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 SESSION_SALT = "kraken-dca-web-session"
+LOGIN_MAX_FAILURES = 5
+LOGIN_GLOBAL_MAX_FAILURES = 50
+LOGIN_WINDOW_SECONDS = 5 * 60
+
+
+class LoginThrottle:
+    """In-memory failed-login throttle for the single-process web UI."""
+
+    def __init__(
+        self,
+        max_failures: int = LOGIN_MAX_FAILURES,
+        global_max_failures: int = LOGIN_GLOBAL_MAX_FAILURES,
+        window_seconds: int = LOGIN_WINDOW_SECONDS,
+    ) -> None:
+        self._max_failures = max_failures
+        self._global_max_failures = global_max_failures
+        self._window_seconds = window_seconds
+        self._failures: dict[str, list[float]] = {}
+        self._global_failures: list[float] = []
+        self._lock = Lock()
+
+    def is_allowed(self, client_key: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            return (
+                len(self._failures.get(client_key, [])) < self._max_failures
+                and len(self._global_failures) < self._global_max_failures
+            )
+
+    def record_failure(self, client_key: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            self._failures.setdefault(client_key, []).append(now)
+            self._global_failures.append(now)
+
+    def record_success(self, client_key: str) -> None:
+        with self._lock:
+            self._failures.pop(client_key, None)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self._window_seconds
+        self._global_failures = [
+            failure for failure in self._global_failures if failure >= cutoff
+        ]
+        for client_key, failures in list(self._failures.items()):
+            recent = [failure for failure in failures if failure >= cutoff]
+            if recent:
+                self._failures[client_key] = recent
+            else:
+                self._failures.pop(client_key, None)
 
 
 def require_web_password(env: Mapping[str, str] | None = None) -> str:
@@ -46,6 +100,26 @@ def new_csrf_token() -> str:
 
 def verify_password(submitted: str, expected: str) -> bool:
     return compare_digest(submitted.encode("utf-8"), expected.encode("utf-8"))
+
+
+def require_login_allowed(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.login_throttle
+    if not throttle.is_allowed(_client_key(request)):
+        raise ApiException(
+            429,
+            "rate_limited",
+            "Too many login attempts. Try again later.",
+        )
+
+
+def record_login_failure(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.login_throttle
+    throttle.record_failure(_client_key(request))
+
+
+def record_login_success(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.login_throttle
+    throttle.record_success(_client_key(request))
 
 
 def encode_session(
@@ -110,3 +184,9 @@ def set_session_cookie(
         samesite="strict",
         secure=request.app.state.cookie_secure,
     )
+
+
+def _client_key(request: Request) -> str:
+    if request.client is None:
+        return "unknown"
+    return request.client.host or "unknown"

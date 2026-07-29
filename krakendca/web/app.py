@@ -35,6 +35,7 @@ def create_app(
         app.state.web_ui_password = password
         app.state.session_serializer = auth.serializer(auth.session_secret(password))
         app.state.cookie_secure = auth.cookie_secure()
+        app.state.login_throttle = auth.LoginThrottle()
         app.state.scheduler = None
         app.state.config_response = _build_config_response(config_path)
         app.state.build_config_response = lambda: _build_config_response(config_path)

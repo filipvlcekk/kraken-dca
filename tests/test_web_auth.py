@@ -146,6 +146,30 @@ def test_login_rejects_wrong_password(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_login_rate_limits_repeated_failed_password_attempts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    app = create_app(config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path))
+
+    with TestClient(app) as client:
+        for _attempt in range(5):
+            response = client.post("/api/session", json={"password": "wrong"})
+            assert response.status_code == 401
+
+        response = client.post("/api/session", json={"password": "wrong"})
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "ok": False,
+        "error": {
+            "code": "rate_limited",
+            "message": "Too many login attempts. Try again later.",
+        },
+    }
+
+
 def test_login_rejects_malformed_json_with_api_envelope(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     app = create_app(config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path))

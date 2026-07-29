@@ -43,7 +43,7 @@ class TestKrakenDCA:
             "18UQEgOHzBIEsqg78BZJCEhvFIzw1Q==",
         )
         # Initialize Config object
-        self.config = Config("tests/fixtures/config.yaml")
+        self.config = Config("tests/fixtures/config_legacy.yaml")
         # Initialize the KrakenDCA object.
         self.kdca = KrakenDCA(self.config, self.ka)
         # Instantiate KrakenDCA DCA pairs.

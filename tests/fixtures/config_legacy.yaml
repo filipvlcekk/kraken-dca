@@ -1,0 +1,14 @@
+api:
+  public_key: "KRAKEN_API_PUBLIC_KEY"
+  private_key: "KRAKEN_API_PRIVATE_KEY"
+
+dca_pairs:
+  - pair: "XETHZEUR"
+    delay: 1
+    amount: 15
+    limit_factor: 0.985
+    max_price: 2900.10
+  - pair: "XXBTZEUR"
+    delay: 3
+    amount: 20
+    ignore_differing_orders: True

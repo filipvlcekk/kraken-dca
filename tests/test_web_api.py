@@ -432,6 +432,26 @@ def test_put_config_validation_error_returns_400(authed_client) -> None:
     assert "dca_pairs.0.amount" in response.json()["error"]["fields"]
 
 
+def test_put_config_rejects_unsafe_orders_filepath(authed_client) -> None:
+    client, _path, csrf = authed_client(valid_config())
+    submitted = valid_config()
+    submitted["orders_filepath"] = "/tmp/orders.csv"
+
+    response = client.put(
+        "/api/config",
+        json={"config": submitted},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+    assert response.json()["error"]["fields"] == {
+        "orders_filepath": (
+            "orders_filepath must be a relative CSV filename without directories."
+        )
+    }
+
+
 def test_put_config_malformed_existing_yaml_error_does_not_leak_secret(
     authed_client,
 ) -> None:
