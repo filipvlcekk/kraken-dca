@@ -10,6 +10,7 @@ import {
   restoreSession,
   runPairNow,
   saveConfig,
+  searchAssetPairs,
   type AppConfig,
 } from '../api'
 
@@ -34,6 +35,7 @@ describe('API client', () => {
     expect(loadSchedulerStatus).toBeTypeOf('function')
     expect(reloadScheduler).toBeTypeOf('function')
     expect(runPairNow).toBeTypeOf('function')
+    expect(searchAssetPairs).toBeTypeOf('function')
   })
 
   it('attaches X-CSRF-Token on unsafe requests', async () => {
@@ -98,6 +100,38 @@ describe('API client', () => {
         headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-token' }),
       }),
     )
+  })
+
+  it('searches asset pairs with an encoded query string', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      ok: true,
+      data: {
+        pairs: [
+          {
+            pair: 'XXBTZEUR',
+            altname: 'XBTEUR',
+            wsname: 'XBT/EUR',
+          },
+        ],
+      },
+    }))
+
+    const response = await searchAssetPairs('XBT/EUR')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/asset-pairs?q=XBT%2FEUR',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(response).toEqual({
+      ok: true,
+      data: [
+        {
+          pair: 'XXBTZEUR',
+          altname: 'XBTEUR',
+          wsname: 'XBT/EUR',
+        },
+      ],
+    })
   })
 
   it('saves config using the backend payload shape and preserves redacted secrets', async () => {

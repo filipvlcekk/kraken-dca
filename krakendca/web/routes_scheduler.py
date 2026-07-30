@@ -77,7 +77,7 @@ async def reload_scheduler(request: Request):
     return ok({"scheduler": serialize_scheduler_status(status)})
 
 
-@router.post("/api/pairs/{pair}/run")
+@router.post("/api/pairs/{pair:path}/run")
 async def run_pair(pair: str, request: Request):
     auth.require_csrf(request)
     scheduler = request.app.state.scheduler

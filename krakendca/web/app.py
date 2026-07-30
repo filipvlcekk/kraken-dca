@@ -15,6 +15,7 @@ from krakendca import config_store
 from krakendca.scheduler import SchedulerService
 from krakendca.web import auth
 from krakendca.web.config_loading import load_config_preserving_root
+from krakendca.web.routes_asset_pairs import router as asset_pairs_router
 from krakendca.web.routes_config import router as config_router
 from krakendca.web.routes_scheduler import router as scheduler_router
 from krakendca.web.routes_session import router as session_router
@@ -62,6 +63,7 @@ def create_app(
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
 
     app.include_router(session_router)
+    app.include_router(asset_pairs_router)
     app.include_router(config_router)
     app.include_router(scheduler_router)
 

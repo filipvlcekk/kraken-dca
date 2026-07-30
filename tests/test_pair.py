@@ -105,6 +105,85 @@ class TestPair:
         error_message = "Fake pair not available on Kraken. Available pairs:"
         assert error_message in str(e_info.value)
 
+    @pytest.mark.parametrize(
+        "input_pair",
+        ["XXBTZEUR", "XBTEUR", "XBT/EUR", "BTCEUR", "BTC/EUR"],
+    )
+    def test_resolve_pair_name_accepts_kraken_aliases(
+        self, input_pair: str
+    ) -> None:
+        asset_pairs = {
+            "XXBTZEUR": {
+                "altname": "XBTEUR",
+                "wsname": "XBT/EUR",
+                "base": "XXBT",
+                "quote": "ZEUR",
+                "pair_decimals": 1,
+                "lot_decimals": 8,
+                "ordermin": "0.0002",
+            }
+        }
+
+        assert Pair.resolve_pair_name(asset_pairs, input_pair) == "XXBTZEUR"
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("xbteur", ["XXBTZEUR"]),
+            ("btc/eur", ["XXBTZEUR"]),
+            ("eth", ["XETHZEUR"]),
+        ],
+    )
+    def test_search_asset_pairs_matches_canonical_altname_wsname_and_btc_alias(
+        self,
+        query: str,
+        expected: list[str],
+    ) -> None:
+        asset_pairs = {
+            "XXBTZEUR": {
+                "altname": "XBTEUR",
+                "wsname": "XBT/EUR",
+                "base": "XXBT",
+                "quote": "ZEUR",
+                "pair_decimals": 1,
+                "lot_decimals": 8,
+                "ordermin": "0.0002",
+            },
+            "XETHZEUR": {
+                "altname": "ETHEUR",
+                "wsname": "ETH/EUR",
+                "base": "XETH",
+                "quote": "ZEUR",
+                "pair_decimals": 2,
+                "lot_decimals": 8,
+                "ordermin": "0.005",
+            },
+        }
+
+        results = Pair.search_asset_pairs(asset_pairs, query)
+
+        assert [result["pair"] for result in results] == expected
+
+    def test_get_pair_from_kraken_stores_canonical_pair_name(self) -> None:
+        ka = Mock()
+        ka.get_assets.return_value = {"ZEUR": {"decimals": 4}}
+        asset_pairs = {
+            "XXBTZEUR": {
+                "altname": "XBTEUR",
+                "wsname": "XBT/EUR",
+                "base": "XXBT",
+                "quote": "ZEUR",
+                "pair_decimals": 1,
+                "lot_decimals": 8,
+                "ordermin": "0.0002",
+            }
+        }
+
+        pair = Pair.get_pair_from_kraken(ka, asset_pairs, "BTC/EUR")
+
+        assert pair.name == "XXBTZEUR"
+        assert pair.alt_name == "XBTEUR"
+
     def test_get_asset_information(self) -> None:
         # Test with existing asset.
         with vcr.use_cassette(

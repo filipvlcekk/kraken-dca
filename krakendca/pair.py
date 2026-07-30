@@ -1,4 +1,5 @@
 """Pair object module."""
+import re
 from typing import TypeVar
 
 from krakenapi import KrakenApi
@@ -67,7 +68,8 @@ class Pair:
         :param pair: Pair to dollar cost average as string.
         :return: Instanced Pair object.
         """
-        pair_information = cls.get_pair_information(asset_pairs, pair)
+        pair_name = cls.resolve_pair_name(asset_pairs, pair)
+        pair_information = cls.get_pair_information(asset_pairs, pair_name)
         alt_name = pair_information.get("altname")
         base = pair_information.get("base")
         quote = pair_information.get("quote")
@@ -77,7 +79,7 @@ class Pair:
         quote_information = cls.get_asset_information(ka, quote)
         quote_decimals = quote_information.get("decimals")
         return cls(
-            pair,
+            pair_name,
             alt_name,
             base,
             quote,
@@ -97,7 +99,8 @@ class Pair:
         :param pair: Pair to find.
         :return: Dict of pair information.
         """
-        pair_information = find_nested_dictionary(asset_pairs, pair)
+        pair_name = Pair.resolve_pair_name(asset_pairs, pair)
+        pair_information = find_nested_dictionary(asset_pairs, pair_name)
         if not pair_information:
             available_pairs = [pair for pair in asset_pairs]
             raise ValueError(
@@ -105,6 +108,106 @@ class Pair:
                 f"Available pairs: {available_pairs}."
             )
         return pair_information
+
+    @staticmethod
+    def resolve_pair_name(asset_pairs: dict, pair: str) -> str:
+        """
+        Resolve user-facing Kraken pair aliases to the canonical pair key.
+
+        :param asset_pairs: Kraken AssetPairs dictionary.
+        :param pair: Pair key, altname, wsname, or common BTC alias.
+        :return: Canonical Kraken pair key, for example XXBTZEUR.
+        """
+        query_variants = Pair._identifier_variants(pair)
+        for pair_name, pair_information in asset_pairs.items():
+            identifiers = Pair._pair_identifier_variants(
+                pair_name,
+                pair_information,
+            )
+            if query_variants & identifiers:
+                return pair_name
+
+        available_pairs = [pair for pair in asset_pairs]
+        raise ValueError(
+            f"{pair} pair not available on Kraken. "
+            f"Available pairs: {available_pairs}."
+        )
+
+    @staticmethod
+    def search_asset_pairs(
+        asset_pairs: dict,
+        query: str = "",
+        limit: int = 25,
+    ) -> list[dict]:
+        """
+        Return compact Kraken pair suggestions matching a query.
+
+        :param asset_pairs: Kraken AssetPairs dictionary.
+        :param query: User search input.
+        :param limit: Maximum number of suggestions.
+        :return: List of compact pair suggestion dictionaries.
+        """
+        normalized_queries = Pair._identifier_variants(query)
+        suggestions = []
+
+        for pair_name, pair_information in asset_pairs.items():
+            identifiers = Pair._pair_identifier_variants(
+                pair_name,
+                pair_information,
+            )
+            if normalized_queries and not Pair._matches_any_query(
+                identifiers,
+                normalized_queries,
+            ):
+                continue
+
+            suggestions.append(
+                {
+                    "pair": pair_name,
+                    "altname": pair_information.get("altname"),
+                    "wsname": pair_information.get("wsname"),
+                    "base": pair_information.get("base"),
+                    "quote": pair_information.get("quote"),
+                }
+            )
+            if len(suggestions) >= limit:
+                break
+
+        return suggestions
+
+    @staticmethod
+    def _pair_identifier_variants(pair_name: str, pair_information: dict) -> set:
+        identifiers = set()
+        for value in (
+            pair_name,
+            pair_information.get("altname"),
+            pair_information.get("wsname"),
+        ):
+            identifiers.update(Pair._identifier_variants(value))
+        return identifiers
+
+    @staticmethod
+    def _identifier_variants(value: object) -> set:
+        if not isinstance(value, str):
+            return set()
+
+        normalized = value.strip().upper()
+        if not normalized:
+            return set()
+
+        btc_alias = normalized.replace("BTC", "XBT")
+        variants = {normalized, btc_alias}
+        for variant in list(variants):
+            variants.add(re.sub(r"[^A-Z0-9.]", "", variant))
+        return variants
+
+    @staticmethod
+    def _matches_any_query(identifiers: set, queries: set) -> bool:
+        for query in queries:
+            for identifier in identifiers:
+                if query in identifier:
+                    return True
+        return False
 
     @staticmethod
     def get_asset_information(ka: KrakenApi, asset: str) -> dict:

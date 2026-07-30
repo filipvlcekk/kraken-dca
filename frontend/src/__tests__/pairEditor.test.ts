@@ -1,9 +1,21 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DcaPairConfig } from '../api'
 import PairEditor from '../components/PairEditor.vue'
 import type { ManualRunState } from '../schedulerStore'
+
+const { searchAssetPairsMock } = vi.hoisted(() => ({
+  searchAssetPairsMock: vi.fn(),
+}))
+
+vi.mock('../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api')>()
+  return {
+    ...actual,
+    searchAssetPairs: searchAssetPairsMock,
+  }
+})
 
 const pairConfig: DcaPairConfig = {
   pair: 'XXBTZEUR',
@@ -20,6 +32,11 @@ const pairConfig: DcaPairConfig = {
 }
 
 describe('PairEditor', () => {
+  beforeEach(() => {
+    searchAssetPairsMock.mockReset()
+    searchAssetPairsMock.mockResolvedValue({ ok: true, data: [] })
+  })
+
   it('renders pair fields, validation errors, and emits pair updates', async () => {
     const wrapper = mount(PairEditor, {
       props: {
@@ -106,6 +123,64 @@ describe('PairEditor', () => {
     })
 
     expect(wrapper.text()).toContain(text)
+  })
+
+  it('fetches matching asset pairs as the user types and emits the canonical pair when selected', async () => {
+    searchAssetPairsMock.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          pair: 'XXBTZEUR',
+          altname: 'XBTEUR',
+          wsname: 'XBT/EUR',
+        },
+        {
+          pair: 'XETHZEUR',
+          altname: 'ETHEUR',
+          wsname: 'ETH/EUR',
+        },
+      ],
+    })
+    const wrapper = mount(PairEditor, {
+      props: {
+        pairConfig,
+        fieldErrors: {},
+        manualRunState: null,
+      },
+    })
+
+    await wrapper.get('input[aria-label="Pair name"]').setValue('xbt')
+    await flushPromises()
+
+    expect(searchAssetPairsMock).toHaveBeenCalledWith('xbt')
+    expect(wrapper.get('[role="listbox"][aria-label="Pair suggestions"]').text()).toContain('XBT/EUR')
+    expect(wrapper.get('[role="listbox"][aria-label="Pair suggestions"]').text()).toContain('XBTEUR')
+
+    await wrapper.get('button[role="option"][aria-label="Select XBT/EUR"]').trigger('click')
+
+    expect(lastEmission(wrapper.emitted('update:pairConfig'))).toEqual([
+      {
+        ...pairConfig,
+        pair: 'XXBTZEUR',
+      },
+    ])
+  })
+
+  it('shows an error and clears loading when asset pair search fails', async () => {
+    searchAssetPairsMock.mockRejectedValue(new Error('network down'))
+    const wrapper = mount(PairEditor, {
+      props: {
+        pairConfig,
+        fieldErrors: {},
+        manualRunState: null,
+      },
+    })
+
+    await wrapper.get('input[aria-label="Pair name"]').setValue('xbt')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Pair search failed.')
+    expect(wrapper.text()).not.toContain('Loading pairs...')
   })
 })
 

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
-import type { DcaPairConfig, DcaPairSchedule } from '../api'
+import {
+  searchAssetPairs,
+  type AssetPairSuggestion,
+  type DcaPairConfig,
+  type DcaPairSchedule,
+} from '../api'
 import type { ManualRunState } from '../schedulerStore'
 import ScheduleEditor from './ScheduleEditor.vue'
 
@@ -18,6 +23,12 @@ const emit = defineEmits<{
 }>()
 
 const pairLabel = computed(() => props.pairConfig.pair || 'pair')
+const pairInput = ref(props.pairConfig.pair)
+const pairSuggestions = ref<AssetPairSuggestion[]>([])
+const pairSuggestionsOpen = ref(false)
+const pairSuggestionsLoading = ref(false)
+const pairSuggestionError = ref<string | null>(null)
+let latestPairSearchId = 0
 const scheduleFieldErrors = computed(() => {
   const entries = Object.entries(props.fieldErrors)
     .filter(([field]) => field.startsWith('schedule.'))
@@ -32,8 +43,86 @@ function updatePair(patch: Partial<DcaPairConfig>): void {
   })
 }
 
-function updateString(field: 'pair', event: Event): void {
-  updatePair({ [field]: (event.target as HTMLInputElement).value })
+watch(
+  () => props.pairConfig.pair,
+  (pair) => {
+    if (pair !== pairInput.value) {
+      pairInput.value = pair
+    }
+  },
+)
+
+async function updatePairInput(event: Event): Promise<void> {
+  const value = (event.target as HTMLInputElement).value
+  pairInput.value = value
+  updatePair({ pair: value })
+  await fetchPairSuggestions(value)
+}
+
+async function fetchPairSuggestions(value: string): Promise<void> {
+  const query = value.trim()
+  latestPairSearchId += 1
+  const searchId = latestPairSearchId
+
+  if (query === '') {
+    pairSuggestions.value = []
+    pairSuggestionsOpen.value = false
+    pairSuggestionsLoading.value = false
+    pairSuggestionError.value = null
+    return
+  }
+
+  pairSuggestionsOpen.value = true
+  pairSuggestionsLoading.value = true
+  pairSuggestionError.value = null
+  pairSuggestions.value = []
+
+  let response: Awaited<ReturnType<typeof searchAssetPairs>>
+  try {
+    response = await searchAssetPairs(query)
+  } catch {
+    if (searchId !== latestPairSearchId) {
+      return
+    }
+    pairSuggestionsLoading.value = false
+    pairSuggestions.value = []
+    pairSuggestionError.value = 'Pair search failed.'
+    pairSuggestionsOpen.value = true
+    return
+  }
+
+  if (searchId !== latestPairSearchId) {
+    return
+  }
+
+  pairSuggestionsLoading.value = false
+  if (response.ok) {
+    pairSuggestions.value = response.data
+    pairSuggestionsOpen.value = response.data.length > 0
+  } else {
+    pairSuggestions.value = []
+    pairSuggestionError.value = response.error.message
+    pairSuggestionsOpen.value = true
+  }
+}
+
+function selectPairSuggestion(suggestion: AssetPairSuggestion): void {
+  pairInput.value = suggestion.pair
+  pairSuggestions.value = []
+  pairSuggestionsOpen.value = false
+  updatePair({ pair: suggestion.pair })
+}
+
+function suggestionLabel(suggestion: AssetPairSuggestion): string {
+  return suggestion.wsname || suggestion.altname || suggestion.pair
+}
+
+function suggestionMeta(suggestion: AssetPairSuggestion): string {
+  const label = suggestionLabel(suggestion)
+  const labels = [suggestion.altname, suggestion.pair].filter(
+    (item) => item && item !== label,
+  )
+  return labels.join(' | ')
 }
 
 function updateNumber(
@@ -75,14 +164,50 @@ function updateMinInterval(value: number): void {
     </header>
 
     <div class="fields">
-      <label>
+      <label class="pair-combobox">
         Pair name
-        <input
-          :value="props.pairConfig.pair"
-          aria-label="Pair name"
-          autocomplete="off"
-          @input="updateString('pair', $event)"
-        />
+        <div
+          class="pair-combobox-control"
+          role="combobox"
+          :aria-expanded="pairSuggestionsOpen"
+          aria-haspopup="listbox"
+        >
+          <input
+            :value="pairInput"
+            aria-label="Pair name"
+            aria-autocomplete="list"
+            autocomplete="off"
+            @focus="pairSuggestionsOpen = pairSuggestions.length > 0"
+            @input="updatePairInput"
+          />
+          <ul
+            v-if="pairSuggestionsOpen"
+            class="pair-suggestions"
+            role="listbox"
+            aria-label="Pair suggestions"
+          >
+            <li v-if="pairSuggestionsLoading" class="pair-suggestion-status">
+              Loading pairs...
+            </li>
+            <li v-else-if="pairSuggestionError" class="pair-suggestion-status">
+              {{ pairSuggestionError }}
+            </li>
+            <li v-for="suggestion in pairSuggestions" :key="suggestion.pair">
+              <button
+                type="button"
+                role="option"
+                :aria-label="`Select ${suggestionLabel(suggestion)}`"
+                @mousedown.prevent
+                @click="selectPairSuggestion(suggestion)"
+              >
+                <span>{{ suggestionLabel(suggestion) }}</span>
+                <small v-if="suggestionMeta(suggestion)">
+                  {{ suggestionMeta(suggestion) }}
+                </small>
+              </button>
+            </li>
+          </ul>
+        </div>
       </label>
 
       <label>
@@ -194,6 +319,65 @@ h2 {
 label {
   display: grid;
   gap: 0.3rem;
+}
+
+.pair-combobox {
+  position: relative;
+}
+
+.pair-combobox-control {
+  position: relative;
+}
+
+.pair-combobox-control input {
+  width: 100%;
+}
+
+.pair-suggestions {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 14rem;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid rgba(34, 50, 35, 0.16);
+  border-radius: 8px;
+  background: #fffdf5;
+  box-shadow: 0 12px 24px rgba(34, 50, 35, 0.14);
+}
+
+.pair-suggestions button {
+  display: grid;
+  width: 100%;
+  gap: 0.12rem;
+  padding: 0.55rem 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pair-suggestions button:hover,
+.pair-suggestions button:focus-visible {
+  background: rgba(68, 101, 58, 0.12);
+  outline: none;
+}
+
+.pair-suggestions small,
+.pair-suggestion-status {
+  color: #69705a;
+  font-size: 0.8rem;
+}
+
+.pair-suggestion-status {
+  padding: 0.55rem 0.6rem;
 }
 
 .checkbox {

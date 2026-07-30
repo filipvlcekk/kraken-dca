@@ -129,7 +129,8 @@ dca_pairs:
     amount: 10
 ```
 - In api, public_key and private_key correspond to your Kraken API key information.
-- Available pairs for pair field can be found [here](https://api.kraken.com/0/public/AssetPairs) on *altname*.
+- In web mode, use the searchable pair field to select a Kraken asset pair. The UI stores Kraken's canonical pair key such as `XXBTZEUR` while showing friendly values such as `XBT/EUR` and `XBTEUR`.
+- When editing YAML manually, prefer Kraken's canonical `AssetPairs` key for `pair` values, for example `XXBTZEUR` for Bitcoin/EUR. The runner also accepts common Kraken aliases such as `XBTEUR`, `XBT/EUR`, and `BTC/EUR`.
 - Amount is the amount of quote asset to sell to buy base asset.
 - `schedule:` configures the Docker web scheduler for a pair. `schedule.cron` must be a five-field Unix cron expression and `schedule.timezone` should be an IANA timezone such as `Europe/Prague` or `UTC`.
 - `min_order_interval_minutes` prevents cron/manual runs from submitting too frequently for the same pair. The default is 30 minutes.

@@ -39,6 +39,14 @@ export type DcaPairConfig = {
   ignore_differing_orders?: boolean
 }
 
+export type AssetPairSuggestion = {
+  pair: string
+  altname?: string
+  wsname?: string
+  base?: string
+  quote?: string
+}
+
 export type AppConfig = {
   api?: {
     public_key?: string | null
@@ -150,6 +158,21 @@ export function runPairNow(
     method: 'POST',
     csrfToken,
   })
+}
+
+export async function searchAssetPairs(
+  q: string,
+): Promise<ApiResponse<AssetPairSuggestion[]>> {
+  const response = await request<{ pairs: AssetPairSuggestion[] }>(
+    `/api/asset-pairs?q=${encodeURIComponent(q)}`,
+  )
+  if (!response.ok) {
+    return response
+  }
+  return {
+    ok: true,
+    data: response.data.pairs,
+  }
 }
 
 type RequestOptions = {

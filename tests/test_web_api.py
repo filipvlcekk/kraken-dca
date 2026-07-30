@@ -586,6 +586,53 @@ def test_reload_reads_saved_config_not_client_payload(authed_client) -> None:
     ] == "XETHZEUR"
 
 
+def test_asset_pair_search_returns_canonical_pair_suggestions(
+    authed_client,
+    monkeypatch,
+) -> None:
+    client, _path, _csrf = authed_client(valid_config())
+
+    class FakeKrakenApi:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def get_asset_pairs(self) -> dict:
+            return {
+                "XXBTZEUR": {
+                    "altname": "XBTEUR",
+                    "wsname": "XBT/EUR",
+                    "base": "XXBT",
+                    "quote": "ZEUR",
+                    "pair_decimals": 1,
+                    "lot_decimals": 8,
+                    "ordermin": "0.0002",
+                }
+            }
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_asset_pairs.KrakenApi",
+        FakeKrakenApi,
+    )
+
+    response = client.get("/api/asset-pairs?q=BTC%2FEUR")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "data": {
+            "pairs": [
+                {
+                    "pair": "XXBTZEUR",
+                    "altname": "XBTEUR",
+                    "wsname": "XBT/EUR",
+                    "base": "XXBT",
+                    "quote": "ZEUR",
+                }
+            ]
+        },
+    }
+
+
 @pytest.mark.parametrize("config_text", ["[]", "foo"])
 def test_reload_rejects_non_mapping_saved_config_with_validation_envelope(
     authed_client,
@@ -709,6 +756,18 @@ def test_manual_run_completed_success_returns_result_fields_at_data_top_level(
         "order_txid": "TXID",
         "message": "message",
     }
+
+
+def test_manual_run_accepts_encoded_slash_pair_path(authed_client) -> None:
+    client, _path, csrf = authed_client(valid_config("XBT/EUR"))
+
+    response = client.post(
+        "/api/pairs/XBT%2FEUR/run",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["pair"] == "XBT/EUR"
 
 
 def test_manual_run_maps_conflict_result_to_409(authed_client) -> None:
