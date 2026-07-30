@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from .order import Order
 from .pair import Pair
@@ -35,7 +35,7 @@ class DCA:
     Dollar Cost Averaging encapsulation.
     """
 
-    ka: KrakenApi
+    ka: KrakenClient
     delay: int
     pair: Pair
     amount: float
@@ -47,7 +47,7 @@ class DCA:
 
     def __init__(
         self,
-        ka: KrakenApi,
+        ka: KrakenClient,
         delay: int,
         pair: Pair,
         amount: float,
@@ -60,7 +60,7 @@ class DCA:
         """
         Initialize the DCA object.
 
-        :param ka: KrakenApi object.
+        :param ka: KrakenClient object.
         :param delay: DCA days delay between buy orders.
         :param pair: Pair to dollar cost average as string.
         :param amount: Amount to dollar cost average as float.

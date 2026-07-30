@@ -3,17 +3,17 @@ from unittest.mock import Mock
 
 import pytest
 import vcr
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 from krakendca.pair import Pair
 
 
 class TestPair:
     pair: Pair
-    ka: KrakenApi
+    ka: KrakenClient
 
     def setup_method(self) -> None:
         self.pair = Pair("XETHZEUR", "ETHEUR", "XETH", "ZEUR", 2, 8, 4, 0.005)
-        self.ka = KrakenApi("api_public_key", "api_private_key")
+        self.ka = KrakenClient("api_public_key", "api_private_key")
 
     @staticmethod
     def assert_xethzeur_pair(pair: Pair) -> None:

@@ -2,7 +2,7 @@
 import logging
 from typing import Any, Dict, List
 
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from .config import Config
 from .dca import DCA
@@ -17,10 +17,10 @@ class KrakenDCA:
     """
 
     config: Config
-    ka: KrakenApi
+    ka: KrakenClient
     dcas_list: List[DCA]
 
-    def __init__(self, config: Config, ka: KrakenApi) -> None:
+    def __init__(self, config: Config, ka: KrakenClient) -> None:
         """
         Instantiate the KrakenDCA object.
 

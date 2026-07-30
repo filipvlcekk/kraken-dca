@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from .dca import DCA
 from .pair import Pair
@@ -28,7 +28,7 @@ class RunResult:
     message: str
 
 
-def run_pair(config: dict, pair_name: str, ka: KrakenApi) -> RunResult:
+def run_pair(config: dict, pair_name: str, ka: KrakenClient) -> RunResult:
     """Run DCA logic for exactly one configured pair."""
     started_at = current_utc_datetime()
     pair_configs = _find_pair_configs(config, pair_name)
@@ -98,7 +98,7 @@ def _find_pair_configs(config: dict, pair_name: str) -> list[dict]:
 
 
 def _build_dca(
-    ka: KrakenApi,
+    ka: KrakenClient,
     config: dict,
     pair_config: dict,
     pair: Pair,

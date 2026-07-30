@@ -2,7 +2,7 @@
 import re
 from typing import TypeVar
 
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from .utils import find_nested_dictionary
 
@@ -57,12 +57,12 @@ class Pair:
 
     @classmethod
     def get_pair_from_kraken(
-        cls, ka: KrakenApi, asset_pairs: dict, pair: str
+        cls, ka: KrakenClient, asset_pairs: dict, pair: str
     ) -> T:
         """
         Initialize the Pair object using KrakenAPI and provided pair.
 
-        :param ka: KrakenApi object.
+        :param ka: KrakenClient object.
         :param asset_pairs: Dictionary of available pairs on Kraken
         got through the API.
         :param pair: Pair to dollar cost average as string.
@@ -210,7 +210,7 @@ class Pair:
         return False
 
     @staticmethod
-    def get_asset_information(ka: KrakenApi, asset: str) -> dict:
+    def get_asset_information(ka: KrakenClient, asset: str) -> dict:
         """
         Return asset information from Kraken API.
 
@@ -229,11 +229,11 @@ class Pair:
         return asset_information
 
     @staticmethod
-    def get_pair_ask_price(ka: KrakenApi, pair_name: str) -> float:
+    def get_pair_ask_price(ka: KrakenClient, pair_name: str) -> float:
         """
         Get pair ask price from Kraken ticker.
 
-        :param ka: KrakenApi object.
+        :param ka: KrakenClient object.
         :param pair_name: Pair name to find ask price.
         :return: Current pair ask price.
         """

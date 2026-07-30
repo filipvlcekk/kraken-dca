@@ -8,7 +8,7 @@ from krakendca.pair import Pair
 from krakendca.runner import RunResult, run_pair
 
 
-class FakeKrakenApi:
+class FakeKrakenClient:
     """Small Kraken API fake for runner unit tests."""
 
     def __init__(
@@ -132,7 +132,7 @@ def test_run_result_returns_completed_skipped_and_failed_shapes(tmp_path):
     completed = run_pair(
         legacy_config(orders_filepath=str(tmp_path / "completed.csv")),
         "XETHZEUR",
-        FakeKrakenApi(),
+        FakeKrakenClient(),
     )
     skipped = run_pair(
         legacy_config(
@@ -140,9 +140,9 @@ def test_run_result_returns_completed_skipped_and_failed_shapes(tmp_path):
             orders_filepath=str(tmp_path / "skipped.csv"),
         ),
         "XETHZEUR",
-        FakeKrakenApi(),
+        FakeKrakenClient(),
     )
-    failed = run_pair(legacy_config(), "XXBTZEUR", FakeKrakenApi())
+    failed = run_pair(legacy_config(), "XXBTZEUR", FakeKrakenClient())
 
     assert isinstance(completed, RunResult)
     assert completed.pair == "XETHZEUR"
@@ -166,8 +166,8 @@ def test_run_result_returns_completed_skipped_and_failed_shapes(tmp_path):
 
 @freeze_time("2021-05-03 00:00:00")
 def test_manual_and_scheduled_runs_use_same_open_order_duplicate_guard():
-    manual_ka = FakeKrakenApi(open_orders=pair_order())
-    scheduled_ka = FakeKrakenApi(open_orders=pair_order())
+    manual_ka = FakeKrakenClient(open_orders=pair_order())
+    scheduled_ka = FakeKrakenClient(open_orders=pair_order())
 
     manual = run_pair(legacy_config(), "XETHZEUR", manual_ka)
     scheduled = run_pair(scheduled_config(), "XETHZEUR", scheduled_ka)
@@ -209,7 +209,7 @@ def test_run_pair_uses_default_min_order_interval_for_scheduled_pair(
     result = run_pair(
         config,
         "XETHZEUR",
-        FakeKrakenApi(open_orders=pair_order()),
+        FakeKrakenClient(open_orders=pair_order()),
     )
 
     assert result.status == "skipped"
@@ -221,7 +221,7 @@ def test_insufficient_funds_returns_failed_result():
     result = run_pair(
         legacy_config(),
         "XETHZEUR",
-        FakeKrakenApi(balance="1.0"),
+        FakeKrakenClient(balance="1.0"),
     )
 
     assert result.status == "failed"
@@ -235,7 +235,7 @@ def test_max_price_guard_returns_skipped_result():
     result = run_pair(
         legacy_config(max_price=90.0),
         "XETHZEUR",
-        FakeKrakenApi(ask_price="100.0"),
+        FakeKrakenClient(ask_price="100.0"),
     )
 
     assert result.status == "skipped"
@@ -254,7 +254,7 @@ def test_scheduled_run_logs_unwritable_order_history_failure(
     result = run_pair(
         scheduled_config(orders_filepath=str(orders_path)),
         "XETHZEUR",
-        FakeKrakenApi(),
+        FakeKrakenClient(),
     )
 
     captured = logging_capture.read()
@@ -268,7 +268,7 @@ def test_kraken_exception_returns_failed_kraken_error():
     result = run_pair(
         legacy_config(),
         "XETHZEUR",
-        FakeKrakenApi(asset_pairs_exception=ConnectionError("network down")),
+        FakeKrakenClient(asset_pairs_exception=ConnectionError("network down")),
     )
 
     assert result.status == "failed"
@@ -287,7 +287,7 @@ def test_dca_value_error_returns_failed_domain_error(monkeypatch):
 
     monkeypatch.setattr("krakendca.runner.DCA", FakeDCA)
 
-    result = run_pair(legacy_config(), "XETHZEUR", FakeKrakenApi())
+    result = run_pair(legacy_config(), "XETHZEUR", FakeKrakenClient())
 
     assert result.status == "failed"
     assert result.reason == "domain_error"
@@ -297,7 +297,7 @@ def test_dca_value_error_returns_failed_domain_error(monkeypatch):
 
 def test_run_pair_fetches_asset_pairs_once_and_builds_pair(monkeypatch):
     asset_pairs = {"asset-pairs": {"sentinel": True}}
-    ka = FakeKrakenApi(asset_pairs=asset_pairs)
+    ka = FakeKrakenClient(asset_pairs=asset_pairs)
     captured = {}
 
     def fake_get_pair_from_kraken(ka_arg, asset_pairs_arg, pair_name_arg):
@@ -343,7 +343,7 @@ def test_duplicate_pair_config_returns_failed_without_calling_kraken():
             {"pair": "XETHZEUR", "amount": 25.0, "delay": 2},
         ]
     }
-    ka = FakeKrakenApi()
+    ka = FakeKrakenClient()
 
     result = run_pair(config, "XETHZEUR", ka)
 
@@ -371,7 +371,7 @@ def test_legacy_runner_mode_preserves_delay(monkeypatch):
 
     monkeypatch.setattr("krakendca.runner.DCA", FakeDCA)
 
-    result = run_pair(legacy_config(delay=7), "XETHZEUR", FakeKrakenApi())
+    result = run_pair(legacy_config(delay=7), "XETHZEUR", FakeKrakenClient())
 
     assert result.status == "completed"
     assert captured["args"][1] == 7

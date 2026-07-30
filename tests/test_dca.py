@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 import vcr
 from freezegun import freeze_time
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from krakendca.dca import DCA
 from krakendca.order import Order
@@ -14,7 +14,7 @@ from krakendca.pair import Pair
 from krakendca.utils import datetime_as_utc_unix
 
 
-class FakeKrakenApi:
+class FakeKrakenClient:
     """Small Kraken API fake for DCA unit tests."""
 
     def __init__(
@@ -97,7 +97,7 @@ class TestDCA:
 
     def setup_method(self):
         # Initialize DCA test object - Fake keys.
-        ka = KrakenApi(
+        ka = KrakenClient(
             "R6/OvXmIQEv1E8nyJd7+a9Zmaf84yJ7uifwe2yj5BgV1N+lgqURsxQwQ",
             "MWZ9lFF/mreK4Fdk/SEpFLvVn//nbKUbCytGShSwvCvYlgRkn4K8i7VY18UQ"
             "EgOHzBIEsqg78B"
@@ -111,7 +111,7 @@ class TestDCA:
         )
 
     def test_init(self):
-        assert type(self.dca.ka) == KrakenApi
+        assert type(self.dca.ka) == KrakenClient
         assert type(self.dca.delay) == int
         assert self.dca.delay == 1
         assert type(self.dca.pair) == Pair
@@ -244,7 +244,7 @@ class TestDCA:
     )
     def test_check_account_balance_no_pair_base(self):
         with patch.object(
-            target=KrakenApi,
+            target=KrakenClient,
             attribute="get_balance",
             return_value={"ZEUR": "0.0"},
         ):
@@ -260,7 +260,7 @@ class TestDCA:
     )
     def test_check_account_balance_no_pair_quote(self):
         with patch.object(
-            target=KrakenApi,
+            target=KrakenClient,
             attribute="get_balance",
             return_value={"XETH": 8.02e-07},
         ):
@@ -423,7 +423,7 @@ class TestDCA:
         assert self.dca.get_limit_price(3896.01, 1) == 3818.1
 
     def test_min_order_interval_zero_skips_closed_order_lookback(self):
-        ka = FakeKrakenApi()
+        ka = FakeKrakenClient()
         dca = DCA(
             ka,
             1,
@@ -442,7 +442,7 @@ class TestDCA:
         closed_orders = fake_order(amount=30.0)
 
         strict_dca = DCA(
-            FakeKrakenApi(
+            FakeKrakenClient(
                 open_orders=open_orders,
                 closed_orders=closed_orders,
             ),
@@ -453,7 +453,7 @@ class TestDCA:
             ignore_differing_orders=False,
         )
         lenient_dca = DCA(
-            FakeKrakenApi(
+            FakeKrakenClient(
                 open_orders=open_orders,
                 closed_orders=closed_orders,
             ),
@@ -469,7 +469,7 @@ class TestDCA:
 
     @freeze_time("2021-05-03 12:34:56")
     def test_cron_closed_order_lookback_uses_utc_minute_start(self):
-        ka = FakeKrakenApi()
+        ka = FakeKrakenClient()
         dca = DCA(
             ka,
             1,
@@ -496,7 +496,7 @@ class TestDCA:
     ):
         orders_path = tmp_path / "orders.csv"
         orders_path.mkdir()
-        ka = FakeKrakenApi()
+        ka = FakeKrakenClient()
         dca = DCA(
             ka,
             1,
@@ -519,7 +519,7 @@ class TestDCA:
         tmp_path,
         monkeypatch,
     ):
-        ka = FakeKrakenApi()
+        ka = FakeKrakenClient()
         dca = DCA(
             ka,
             1,

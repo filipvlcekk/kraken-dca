@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import vcr
 from freezegun import freeze_time
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from krakendca.config import Config
 from krakendca.dca import DCA
@@ -28,7 +28,7 @@ class FakeDCA:
 
 class TestKrakenDCA:
     config: Config
-    ka: KrakenApi
+    ka: KrakenClient
     kdca: KrakenDCA
 
     @vcr.use_cassette(
@@ -37,7 +37,7 @@ class TestKrakenDCA:
     )
     def setup_method(self):
         # Initialize DCA test object - Fake keys.
-        self.ka = KrakenApi(
+        self.ka = KrakenClient(
             "R6/OvXmIQEv1E8nyJd7+a9Zmaf84yJ7uifwe2yj5BgV1N+lgqURsxQwQ",
             "MWZ9lFF/mreK4Fdk/SEpFLvVn//nbKUbCytGShSwvCvYlgRkn4K8i7VY"
             "18UQEgOHzBIEsqg78BZJCEhvFIzw1Q==",

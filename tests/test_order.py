@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 import vcr
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 from krakendca.order import Order
 
 
@@ -26,7 +26,7 @@ class TestOrder:
             0.0519,
             round(19.9481 + 0.0519, 4),
         )
-        self.ka = KrakenApi(
+        self.ka = KrakenClient(
             "R6/OvXmIQEv1E8nyJd7+a9Zmaf84yJ7uifwe2yj5BgV1N+lgqURsxQwQ",
             "MWZ9lFF/mreK4Fdk/SEpFLvVn//nbKUbCytGShSwvCvYlgRkn4K8i7VY18UQEgOHz"
             "BIEsqg78BZJCEhvFIzw1Q==",

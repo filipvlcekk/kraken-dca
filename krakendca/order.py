@@ -5,7 +5,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import TypeVar
 
 import pandas as pd
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 T = TypeVar("T", bound="Order")
 
@@ -116,7 +116,7 @@ class Order:
             total_price,
         )
 
-    def send_order(self, ka: KrakenApi) -> None:
+    def send_order(self, ka: KrakenClient) -> None:
         """
         Execute the order by sending it to Kraken API.
         Add the returned TXID and order description to Order object.

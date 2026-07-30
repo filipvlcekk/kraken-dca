@@ -11,7 +11,7 @@ from typing import Callable, Mapping
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from krakendca import config_store
 from krakendca.runner import RunResult, run_pair
@@ -45,12 +45,12 @@ class SchedulerService:
         self,
         config_path: str,
         env: Mapping[str, str] | None = None,
-        kraken_api_factory: Callable[[str, str], KrakenApi] | None = None,
-        runner: Callable[[dict, str, KrakenApi], RunResult] | None = None,
+        kraken_api_factory: Callable[[str, str], KrakenClient] | None = None,
+        runner: Callable[[dict, str, KrakenClient], RunResult] | None = None,
     ) -> None:
         self.config_path = config_path
         self._env = env
-        self._kraken_api_factory = kraken_api_factory or KrakenApi
+        self._kraken_api_factory = kraken_api_factory or KrakenClient
         self._runner = runner or run_pair
         self._scheduler = self._create_scheduler()
         self._lifecycle_lock = threading.Lock()

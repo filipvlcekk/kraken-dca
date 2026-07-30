@@ -592,7 +592,7 @@ def test_asset_pair_search_returns_canonical_pair_suggestions(
 ) -> None:
     client, _path, _csrf = authed_client(valid_config())
 
-    class FakeKrakenApi:
+    class FakeKrakenClient:
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
@@ -610,8 +610,8 @@ def test_asset_pair_search_returns_canonical_pair_suggestions(
             }
 
     monkeypatch.setattr(
-        "krakendca.web.routes_asset_pairs.KrakenApi",
-        FakeKrakenApi,
+        "krakendca.web.routes_asset_pairs.KrakenClient",
+        FakeKrakenClient,
     )
 
     response = client.get("/api/asset-pairs?q=BTC%2FEUR")

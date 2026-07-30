@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
-from krakenapi import KrakenApi
+from krakendca.kraken_client import KrakenClient
 
 from krakendca.pair import Pair
 from krakendca.web import auth
@@ -20,7 +20,7 @@ async def search_asset_pairs(
     """Return compact Kraken asset pair suggestions for a search query."""
     auth.require_authenticated_session(request)
     try:
-        asset_pairs = KrakenApi("", "").get_asset_pairs()
+        asset_pairs = KrakenClient("", "").get_asset_pairs()
     except (ConnectionError, OSError, TimeoutError, ValueError) as exc:
         raise ApiException(
             502,
