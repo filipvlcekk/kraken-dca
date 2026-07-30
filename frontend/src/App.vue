@@ -145,7 +145,7 @@ function pairFieldErrors(index: number): Record<string, string> {
         <div class="pairs-grid">
           <PairEditor
             v-for="(pair, index) in pairs"
-            :key="`${pair.pair}-${index}`"
+            :key="index"
             :pair-config="pair"
             :field-errors="pairFieldErrors(index)"
             :manual-run-state="scheduler.state.manualRuns[pair.pair] ?? null"

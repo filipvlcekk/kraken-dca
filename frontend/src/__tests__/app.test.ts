@@ -131,6 +131,77 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Save config')
   })
 
+  it('keeps the pair input mounted while editing the pair value', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/session') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            authenticated: true,
+            csrf_token: 'csrf-token',
+          },
+        }))
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            config: {
+              dca_pairs: [
+                {
+                  pair: 'XXBTZEUR',
+                  amount: 15,
+                  schedule: {
+                    enabled: true,
+                    cron: '0 9 * * *',
+                    timezone: 'Europe/Prague',
+                  },
+                  min_order_interval_minutes: 30,
+                },
+              ],
+            },
+            secrets: emptySecrets,
+            config_valid: true,
+            validation_errors: {},
+          },
+        }))
+      }
+      if (path === '/api/scheduler') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            running: true,
+            config_applied: true,
+            saved_config_fingerprint: 'saved',
+            active_config_fingerprint: 'active',
+            reload_error: null,
+            last_reload_at: null,
+            jobs: [],
+          },
+        }))
+      }
+      if (path.startsWith('/api/asset-pairs')) {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: { pairs: [] },
+        }))
+      }
+      return Promise.resolve(jsonResponse({ ok: true, data: {} }))
+    })
+
+    const wrapper = mount(App)
+    await flushDashboard()
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="Pair name"]')
+    const originalElement = input.element
+
+    await input.setValue('X')
+    await flushPromises()
+
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Pair name"]').element)
+      .toBe(originalElement)
+  })
+
   it('shows setup and degraded state through config warnings', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = String(input)
