@@ -1,8 +1,8 @@
 """order.py tests module."""
+import csv
 import os
 from datetime import datetime
 
-import pandas as pd
 import pytest
 import vcr
 from krakendca.kraken_client import KrakenClient
@@ -101,15 +101,15 @@ class TestOrder:
     def test_save_order_csv(self) -> None:
         self.order.txid = "OCYS4K-OILOE-36HPAE"
         self.order.description = "buy 0.00957589 ETHEUR @ limit 2083.16"
-        test_history = pd.read_csv("tests/fixtures/test_handle_dca_logic.csv")
-        test_history.iloc[[0]].to_csv(self.test_orders_filepath, index=False)
+        test_history = _read_csv_rows("tests/fixtures/test_handle_dca_logic.csv")
+        _write_csv_rows(self.test_orders_filepath, test_history[:1])
 
         # Test order history CSV saving.
         self.order.save_order_csv(self.test_orders_filepath)
         self.order.save_order_csv(self.test_orders_filepath)
-        history = pd.read_csv(self.test_orders_filepath)
+        history = _read_csv_rows(self.test_orders_filepath)
         os.remove(self.test_orders_filepath)
-        assert history.equals(test_history)
+        assert history == test_history
 
         # Test with bad order history file type.
         os.mkdir(self.test_orders_filepath)
@@ -135,13 +135,12 @@ class TestOrder:
         order.description = "\t-unsafe"
 
         order.save_order_csv(self.test_orders_filepath)
-        history = pd.read_csv(self.test_orders_filepath)
+        history = _read_csv_rows(self.test_orders_filepath)
         os.remove(self.test_orders_filepath)
 
-        assert history.loc[0, "txid"] == "' =CMD()"
-        assert history.loc[0, "description"] == "'\t-unsafe"
-        assert not isinstance(history.loc[0, "price"], str)
-        assert history.loc[0, "price"] == 19.9481
+        assert history[0]["txid"] == "' =CMD()"
+        assert history[0]["description"] == "'\t-unsafe"
+        assert history[0]["price"] == "19.9481"
 
     def test_set_order_volume(self) -> None:
         # Test with valid parameters.
@@ -171,3 +170,17 @@ class TestOrder:
         order_fee = Order.estimate_order_fee(0.01105373, 1802.82, 2)
         assert type(order_fee) == float
         assert order_fee == 0.05
+
+
+def _read_csv_rows(path: str) -> list[dict[str, str]]:
+    with open(path, newline="") as csv_file:
+        return list(csv.DictReader(csv_file))
+
+
+def _write_csv_rows(path: str, rows: list[dict[str, str]]) -> None:
+    if not rows:
+        raise ValueError("rows must not be empty.")
+    with open(path, "w", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)

@@ -1,10 +1,10 @@
 """Order object module."""
+import csv
 import re
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import TypeVar
 
-import pandas as pd
 from krakendca.kraken_client import KrakenClient
 
 T = TypeVar("T", bound="Order")
@@ -145,19 +145,24 @@ class Order:
             key: self._sanitize_csv_value(value)
             for key, value in self.__dict__.items()
         }
+        fieldnames = list(sanitized_order)
         try:
-            history = pd.read_csv(orders_filepath)
-            history = pd.concat(
-                [history, pd.DataFrame.from_records([sanitized_order])],
-                ignore_index=True,
+            existing_fieldnames = self._read_order_csv_header(
+                orders_filepath,
             )
-        # No order history yet.
-        except (FileNotFoundError, pd.errors.EmptyDataError):
-            history = pd.DataFrame(sanitized_order, index=[0])
-        # Bad history file format.
-        except (pd.errors.ParserError, IsADirectoryError) as e:
+            if existing_fieldnames and existing_fieldnames != fieldnames:
+                raise ValueError(
+                    "existing order history has unexpected columns"
+                )
+            write_header = not existing_fieldnames
+            mode = "a" if existing_fieldnames else "w"
+            with open(orders_filepath, mode, newline="") as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(sanitized_order)
+        except (csv.Error, OSError) as e:
             raise ValueError(f"Can't save order history -> {e}")
-        history.to_csv(orders_filepath, index=False)
 
     @staticmethod
     def set_order_volume(
@@ -245,3 +250,11 @@ class Order:
         if isinstance(value, str) and re.match(r"^\s*[=+\-@]", value):
             return f"'{value}"
         return value
+
+    @staticmethod
+    def _read_order_csv_header(orders_filepath: str) -> list[str]:
+        try:
+            with open(orders_filepath, newline="") as csv_file:
+                return next(csv.reader(csv_file), [])
+        except FileNotFoundError:
+            return []
