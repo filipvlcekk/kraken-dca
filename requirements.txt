@@ -1,5 +1,5 @@
 PyYAML==6.0.3
-APScheduler==3.10.4
+APScheduler==3.11.3
 croniter==6.0.0
 fastapi==0.115.6
 httpx==0.28.1

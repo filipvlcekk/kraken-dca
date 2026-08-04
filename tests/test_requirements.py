@@ -18,3 +18,9 @@ def test_pandas_is_not_a_runtime_dependency() -> None:
     requirements = Path("requirements.txt").read_text()
 
     assert "pandas" not in requirements.lower()
+
+
+def test_apscheduler_uses_current_stable_3_x_release() -> None:
+    requirements = Path("requirements.txt").read_text()
+
+    assert "APScheduler==3.11.3" in requirements
