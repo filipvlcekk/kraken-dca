@@ -14,6 +14,7 @@ from yaml import YAMLError
 from krakendca import config_store
 from krakendca.scheduler import SchedulerService
 from krakendca.web import auth
+from krakendca.web.oidc import require_oidc_config
 from krakendca.web.config_loading import load_config_preserving_root
 from krakendca.web.routes_asset_pairs import router as asset_pairs_router
 from krakendca.web.routes_config import router as config_router
@@ -38,6 +39,9 @@ def create_app(
         )
         app.state.auth_mode = auth_mode
         app.state.web_ui_password = password
+        app.state.oidc_config = (
+            require_oidc_config() if auth_mode == "oidc" else None
+        )
         app.state.session_serializer = auth.serializer(
             auth.session_secret(password)
         )

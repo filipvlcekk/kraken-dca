@@ -31,6 +31,19 @@ def _set_web_auth_env(
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", session_secret)
 
 
+def _set_oidc_auth_env(monkeypatch) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "oidc")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
+    monkeypatch.setenv("WEB_UI_OIDC_ISSUER", "https://id.example.com")
+    monkeypatch.setenv("WEB_UI_OIDC_CLIENT_ID", "client-id")
+    monkeypatch.setenv("WEB_UI_OIDC_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv(
+        "WEB_UI_OIDC_REDIRECT_URL",
+        "https://app.example.com/api/auth/oidc/callback",
+    )
+    monkeypatch.setenv("WEB_UI_OIDC_ALLOWED_GROUP", "kraken-dca-admins")
+
+
 def test_startup_requires_web_ui_password(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.delenv("WEB_UI_PASSWORD", raising=False)
@@ -80,6 +93,49 @@ def test_password_mode_requires_web_ui_password(
     )
 
     with pytest.raises(RuntimeError, match="WEB_UI_PASSWORD"):
+        with TestClient(app, base_url="https://testserver"):
+            pass
+
+
+def test_oidc_mode_does_not_require_web_ui_password(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    monkeypatch.delenv("WEB_UI_PASSWORD", raising=False)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get("/api/session")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "data": {"authenticated": False}}
+
+
+@pytest.mark.parametrize(
+    "missing_env",
+    [
+        "WEB_UI_OIDC_ISSUER",
+        "WEB_UI_OIDC_CLIENT_ID",
+        "WEB_UI_OIDC_CLIENT_SECRET",
+        "WEB_UI_OIDC_REDIRECT_URL",
+        "WEB_UI_OIDC_ALLOWED_GROUP",
+    ],
+)
+def test_oidc_mode_requires_oidc_configuration(
+    tmp_path,
+    monkeypatch,
+    missing_env,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    monkeypatch.delenv(missing_env)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with pytest.raises(RuntimeError, match=missing_env):
         with TestClient(app, base_url="https://testserver"):
             pass
 
