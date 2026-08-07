@@ -24,3 +24,9 @@ def test_apscheduler_uses_current_stable_3_x_release() -> None:
     requirements = Path("requirements.txt").read_text()
 
     assert "APScheduler==3.11.3" in requirements
+
+
+def test_croniter_uses_current_stable_release() -> None:
+    requirements = Path("requirements.txt").read_text()
+
+    assert "croniter==6.2.4" in requirements
