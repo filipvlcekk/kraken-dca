@@ -32,15 +32,25 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        password = auth.require_web_password()
+        auth_mode = auth.require_auth_mode()
+        password = (
+            auth.require_web_password() if auth_mode == "password" else None
+        )
+        app.state.auth_mode = auth_mode
         app.state.web_ui_password = password
-        app.state.session_serializer = auth.serializer(auth.session_secret(password))
+        app.state.session_serializer = auth.serializer(
+            auth.session_secret(password)
+        )
         app.state.cookie_secure = auth.cookie_secure()
         app.state.login_throttle = auth.LoginThrottle()
         app.state.scheduler = None
         app.state.config_response = _build_config_response(config_path)
-        app.state.build_config_response = lambda: _build_config_response(config_path)
-        app.state.reload_scheduler = lambda config: _reload_scheduler(app, config)
+        app.state.build_config_response = lambda: _build_config_response(
+            config_path
+        )
+        app.state.reload_scheduler = lambda config: _reload_scheduler(
+            app, config
+        )
 
         if app.state.config_response["config_valid"]:
             scheduler = SchedulerService(config_path)
@@ -60,7 +70,9 @@ def create_app(
 
     app.add_exception_handler(ApiException, _api_exception_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
-    app.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    app.add_exception_handler(
+        RequestValidationError, _validation_exception_handler
+    )
 
     app.include_router(session_router)
     app.include_router(asset_pairs_router)
@@ -70,7 +82,10 @@ def create_app(
     @app.middleware("http")
     async def refresh_authenticated_session(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path != "/api/session" and 200 <= response.status_code < 400:
+        if (
+            request.url.path != "/api/session"
+            and 200 <= response.status_code < 400
+        ):
             session = getattr(request.state, "authenticated_session", None)
             if session is not None:
                 auth.set_session_cookie(
@@ -111,7 +126,7 @@ def _build_config_response(config_path: str) -> dict[str, Any]:
             "validation_errors": {"config": "Config file not found."},
             "raw_yaml": None,
         }
-    except YAMLError as exc:
+    except YAMLError:
         return _invalid_config_response(_YAML_PARSE_ERROR)
 
     if not isinstance(loaded, dict):

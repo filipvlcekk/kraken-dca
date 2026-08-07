@@ -98,6 +98,7 @@ def reset_fake_scheduler(monkeypatch):
 
 @pytest.fixture()
 def authed_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
 
@@ -251,6 +252,7 @@ def test_invalid_utf8_config_enters_degraded_mode_without_leaking_bytes(
     tmp_path,
     monkeypatch,
 ) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"
@@ -298,6 +300,7 @@ def test_yaml_parser_error_text_is_sanitized_in_degraded_config_response(
     monkeypatch,
 ) -> None:
     secret = "-----BEGIN FAKE PRIVATE KEY-----"
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"
@@ -701,6 +704,7 @@ def test_reload_invalid_utf8_config_returns_validation_error(
     tmp_path,
     monkeypatch,
 ) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"

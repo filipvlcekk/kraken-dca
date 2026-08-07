@@ -26,11 +26,13 @@ def _set_web_auth_env(
     password: str = "secret",
     session_secret: str = TEST_SESSION_SECRET,
 ) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", password)
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", session_secret)
 
 
 def test_startup_requires_web_ui_password(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.delenv("WEB_UI_PASSWORD", raising=False)
     app = create_app(
         config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
@@ -42,6 +44,7 @@ def test_startup_requires_web_ui_password(tmp_path, monkeypatch) -> None:
 
 
 def test_startup_rejects_empty_web_ui_password(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "")
     app = create_app(
         config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
@@ -52,7 +55,37 @@ def test_startup_rejects_empty_web_ui_password(tmp_path, monkeypatch) -> None:
             pass
 
 
+def test_startup_requires_web_ui_auth_mode(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("WEB_UI_AUTH_MODE", raising=False)
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with pytest.raises(RuntimeError, match="WEB_UI_AUTH_MODE"):
+        with TestClient(app, base_url="https://testserver"):
+            pass
+
+
+def test_password_mode_requires_web_ui_password(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
+    monkeypatch.delenv("WEB_UI_PASSWORD", raising=False)
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with pytest.raises(RuntimeError, match="WEB_UI_PASSWORD"):
+        with TestClient(app, base_url="https://testserver"):
+            pass
+
+
 def test_startup_requires_web_ui_session_secret(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.delenv("WEB_UI_SESSION_SECRET", raising=False)
     app = create_app(
@@ -73,6 +106,7 @@ def test_startup_rejects_weak_web_ui_session_secret(
     monkeypatch,
     session_secret,
 ) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
     monkeypatch.setenv("WEB_UI_SESSION_SECRET", session_secret)
     app = create_app(

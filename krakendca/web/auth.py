@@ -7,7 +7,7 @@ import secrets
 import time
 from hmac import compare_digest
 from threading import Lock
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from fastapi import Request
 from fastapi.responses import Response
@@ -29,6 +29,7 @@ WEAK_SESSION_SECRETS = {
     "secret",
 }
 WEAK_SESSION_SECRET_PREFIXES = ("change-me",)
+AUTH_MODES = {"password", "oidc"}
 
 
 class LoginThrottle:
@@ -88,7 +89,23 @@ def require_web_password(env: Mapping[str, str] | None = None) -> str:
     return password
 
 
-def session_secret(password: str, env: Mapping[str, str] | None = None) -> str:
+def require_auth_mode(
+    env: Mapping[str, str] | None = None,
+) -> Literal["password", "oidc"]:
+    values = os.environ if env is None else env
+    mode = (values.get("WEB_UI_AUTH_MODE") or "").strip().lower()
+    if mode not in AUTH_MODES:
+        raise RuntimeError(
+            "WEB_UI_AUTH_MODE is required for web mode and must be "
+            "'password' or 'oidc'.",
+        )
+    return mode  # type: ignore[return-value]
+
+
+def session_secret(
+    password: str | None,
+    env: Mapping[str, str] | None = None,
+) -> str:
     del password
     values = os.environ if env is None else env
     secret = (values.get("WEB_UI_SESSION_SECRET") or "").strip()
