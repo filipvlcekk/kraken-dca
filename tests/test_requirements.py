@@ -1,6 +1,20 @@
 from pathlib import Path
 
 
+def test_runtime_dependencies_are_intentional() -> None:
+    requirements = _runtime_requirements()
+
+    assert requirements == {
+        "APScheduler",
+        "PyYAML",
+        "croniter",
+        "fastapi",
+        "httpx",
+        "itsdangerous",
+        "uvicorn",
+    }
+
+
 def test_web_scheduler_dependencies_are_declared() -> None:
     requirements = _read("requirements.txt")
     for package in (
@@ -81,3 +95,14 @@ def test_uvicorn_uses_current_stable_release() -> None:
 
 def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+
+def _runtime_requirements() -> set[str]:
+    requirements = _read("requirements.txt")
+    packages = set()
+    for line in requirements.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        packages.add(stripped.split("==", maxsplit=1)[0])
+    return packages

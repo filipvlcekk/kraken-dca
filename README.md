@@ -226,6 +226,11 @@ dependencies:
 ```sh
 python -m pip install -r requirements-dev.txt
 ```
+Runtime dependencies are intentionally kept small. OIDC work should reuse the
+existing `httpx` runtime dependency for provider HTTP calls, and any JWT/OIDC
+validation dependency should be added deliberately with tests that document why it
+belongs in the runtime image.
+
 You can then launch the program from the folder where you downloaded the repository folder using:
 ```sh
 python kraken-dca
