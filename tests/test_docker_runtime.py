@@ -51,6 +51,13 @@ def test_dockerfile_final_runtime_supports_coolify_healthchecks() -> None:
     assert "rm -rf /var/lib/apt/lists/*" in final_stage
 
 
+def test_dockerfile_final_runtime_installs_only_runtime_requirements() -> None:
+    final_stage = _final_stage(_read("Dockerfile"))
+
+    assert "requirements.txt" in final_stage
+    assert "requirements-dev.txt" not in final_stage
+
+
 def test_readme_documents_docker_web_ui_runtime() -> None:
     readme = _read("README.md")
 

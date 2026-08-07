@@ -213,6 +213,11 @@ python3.12 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
+For local development and test runs, install the additional pinned test
+dependencies:
+```sh
+python -m pip install -r requirements-dev.txt
+```
 You can then launch the program from the folder where you downloaded the repository folder using:
 ```sh
 python kraken-dca
@@ -256,5 +261,6 @@ creating an issue, fork or create a pull request. Before issuing a pull request,
 sure the changes did not break any existing functionality and are fully covered with
 unit tests by running this command in the base directory:
 ```sh
+python -m pip install -r requirements-dev.txt
 pytest -vv --cov
 ```
