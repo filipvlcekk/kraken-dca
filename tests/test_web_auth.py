@@ -3,22 +3,47 @@
 from __future__ import annotations
 
 from http.cookies import SimpleCookie
+import time
 from urllib.parse import parse_qs, urlparse
 
 import itsdangerous.timed
 import pytest
 from fastapi.testclient import TestClient
+from joserfc import jwt
+from joserfc.jwk import KeySet, RSAKey
 from itsdangerous import BadSignature
 
 from krakendca.web import auth
+from krakendca.web import oidc
 from krakendca.web.app import create_app
 
 TEST_SESSION_SECRET = "test-session-secret-value-32-bytes"
 
 
+class FakeOidcClient:
+    def __init__(
+        self,
+        groups: list[str] | None = None,
+        token_value: str = "opaque-token",
+    ) -> None:
+        self.groups = groups or ["kraken-dca-admins"]
+        self.token_value = token_value
+        self.calls: list[dict[str, str]] = []
+
+    async def authenticate(self, code: str, nonce: str):
+        self.calls.append({"code": code, "nonce": nonce})
+        return oidc.OidcIdentity(
+            subject="user-123",
+            email="user@example.com",
+            groups=self.groups,
+            token_value=self.token_value,
+        )
+
+
 def _session_cookie_value(response) -> str:
     cookie = SimpleCookie()
-    cookie.load(response.headers["set-cookie"])
+    for header in response.headers.get_list("set-cookie"):
+        cookie.load(header)
     return cookie[auth.COOKIE_NAME].value
 
 
@@ -43,6 +68,39 @@ def _set_oidc_auth_env(monkeypatch) -> None:
         "https://app.example.com/api/auth/oidc/callback",
     )
     monkeypatch.setenv("WEB_UI_OIDC_ALLOWED_GROUP", "kraken-dca-admins")
+
+
+def _oidc_config() -> oidc.OidcConfig:
+    return oidc.OidcConfig(
+        issuer="https://id.example.com",
+        client_id="client-id",
+        client_secret="client-secret",
+        redirect_url="https://app.example.com/api/auth/oidc/callback",
+        allowed_group="kraken-dca-admins",
+    )
+
+
+def _signed_id_token(
+    key: RSAKey,
+    claims: dict,
+) -> str:
+    return jwt.encode(
+        {"alg": "RS256", "kid": key.as_dict()["kid"]},
+        claims,
+        key,
+    )
+
+
+def _valid_oidc_claims() -> dict:
+    return {
+        "iss": "https://id.example.com",
+        "aud": "client-id",
+        "sub": "user-123",
+        "email": "user@example.com",
+        "groups": ["kraken-dca-admins"],
+        "nonce": "nonce-value",
+        "exp": int(time.time()) + 300,
+    }
 
 
 def test_startup_requires_web_ui_password(tmp_path, monkeypatch) -> None:
@@ -179,6 +237,348 @@ def test_oidc_start_redirects_to_provider_and_sets_state_cookie(
     assert "SameSite=lax" in cookie
     assert "Path=/api/auth/oidc" in cookie
     assert "Max-Age=600" in cookie
+
+
+def test_oidc_callback_rejects_missing_state_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/auth/oidc/callback?code=code&state=state",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_tampered_state_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.cookies.set(
+            oidc.OIDC_STATE_COOKIE_NAME,
+            "tampered",
+            path="/api/auth/oidc",
+        )
+        response = client.get(
+            "/api/auth/oidc/callback?code=code&state=state",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+    assert "Max-Age=0" not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_state_mismatch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        location = start.headers["location"]
+        state = parse_qs(urlparse(location).query)["state"][0]
+        response = client.get(
+            (
+                "/api/auth/oidc/callback"
+                f"?code=code&state={state}-wrong"
+            ),
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+    assert "Max-Age=0" not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_provider_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/auth/oidc/callback?error=access_denied",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_provider_error_with_state_mismatch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.get("/api/auth/oidc/start", follow_redirects=False)
+        response = client.get(
+            (
+                "/api/auth/oidc/callback"
+                "?error=access_denied&state=wrong-state"
+            ),
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert "Max-Age=0" not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_missing_state_without_clearing_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.get("/api/auth/oidc/start", follow_redirects=False)
+        response = client.get(
+            "/api/auth/oidc/callback?error=access_denied",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert "Max-Age=0" not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rejects_identity_without_allowed_group(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.app.state.oidc_client = FakeOidcClient(groups=["other"])
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        query = parse_qs(urlparse(start.headers["location"]).query)
+        response = client.get(
+            (
+                "/api/auth/oidc/callback"
+                f"?code=code&state={query['state'][0]}"
+            ),
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+    assert "Max-Age=0" in response.headers["set-cookie"]
+
+
+def test_oidc_callback_creates_app_session_without_storing_tokens(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake_client = FakeOidcClient(token_value="secret-access-token")
+        client.app.state.oidc_client = fake_client
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        query = parse_qs(urlparse(start.headers["location"]).query)
+        response = client.get(
+            (
+                "/api/auth/oidc/callback"
+                f"?code=code&state={query['state'][0]}"
+            ),
+            follow_redirects=False,
+        )
+        restored = client.get("/api/session")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/"
+    assert fake_client.calls == [{"code": "code", "nonce": query["nonce"][0]}]
+    assert oidc.OIDC_STATE_COOKIE_NAME in response.headers["set-cookie"]
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    session = auth.serializer(TEST_SESSION_SECRET).loads(
+        _session_cookie_value(response),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+    )
+    assert session["authenticated"] is True
+    assert session["auth_mode"] == "oidc"
+    assert session["sub"] == "user-123"
+    assert session["email"] == "user@example.com"
+    assert session["groups"] == ["kraken-dca-admins"]
+    assert session["reauth_after"] > session["created_at"]
+    assert "secret-access-token" not in str(session)
+    assert "id_token" not in session
+    assert "access_token" not in session
+    assert "refresh_token" not in session
+    assert restored.json()["data"]["authenticated"] is True
+    assert restored.json()["data"]["csrf_token"]
+
+
+def test_oidc_session_refresh_preserves_identity_payload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.app.state.oidc_client = FakeOidcClient()
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/oidc/callback?code=code&state={state}",
+            follow_redirects=False,
+        )
+        restored = client.get("/api/session")
+
+    callback_session = auth.serializer(TEST_SESSION_SECRET).loads(
+        _session_cookie_value(callback),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+    )
+    refreshed_session = auth.serializer(TEST_SESSION_SECRET).loads(
+        _session_cookie_value(restored),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+    )
+    for key in (
+        "auth_mode",
+        "sub",
+        "email",
+        "groups",
+        "created_at",
+        "reauth_after",
+    ):
+        assert refreshed_session[key] == callback_session[key]
+
+
+def test_expired_oidc_session_requires_reauthentication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+    expired_cookie = auth.serializer(TEST_SESSION_SECRET).dumps(
+        {
+            "authenticated": True,
+            "csrf_token": auth.new_csrf_token(),
+            "auth_mode": "oidc",
+            "sub": "user-123",
+            "groups": ["kraken-dca-admins"],
+            "created_at": int(time.time()) - 7200,
+            "reauth_after": int(time.time()) - 1,
+        },
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.cookies.set(auth.COOKIE_NAME, expired_cookie)
+        session_response = client.get("/api/session")
+        config_response = client.get("/api/config")
+
+    assert session_response.status_code == 200
+    assert session_response.json() == {
+        "ok": True,
+        "data": {"authenticated": False},
+    }
+    assert config_response.status_code == 401
+
+
+def test_password_login_is_disabled_in_oidc_mode(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.post("/api/session", json={"password": "secret"})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_oidc_client_accepts_valid_id_token() -> None:
+    key = RSAKey.generate_key(auto_kid=True)
+    client = oidc.OidcClient(_oidc_config())
+    token = _signed_id_token(key, _valid_oidc_claims())
+
+    identity = client._identity_from_id_token(
+        token,
+        KeySet([key]).as_dict(),
+        "nonce-value",
+    )
+
+    assert identity.subject == "user-123"
+    assert identity.email == "user@example.com"
+    assert identity.groups == ["kraken-dca-admins"]
+    assert identity.token_value == token
+
+
+@pytest.mark.parametrize(
+    "claim_updates,nonce",
+    [
+        ({"iss": "https://evil.example.com"}, "nonce-value"),
+        ({"aud": "wrong-client"}, "nonce-value"),
+        ({"exp": 1}, "nonce-value"),
+        ({}, "wrong-nonce"),
+    ],
+)
+def test_oidc_client_rejects_invalid_id_token_claims(
+    claim_updates,
+    nonce,
+) -> None:
+    key = RSAKey.generate_key(auto_kid=True)
+    claims = _valid_oidc_claims()
+    claims.update(claim_updates)
+    token = _signed_id_token(key, claims)
+    client = oidc.OidcClient(_oidc_config())
+
+    with pytest.raises(Exception):
+        client._identity_from_id_token(
+            token,
+            KeySet([key]).as_dict(),
+            nonce,
+        )
 
 
 def test_startup_requires_web_ui_session_secret(tmp_path, monkeypatch) -> None:

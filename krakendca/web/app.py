@@ -43,6 +43,11 @@ def create_app(
         app.state.oidc_config = (
             oidc.require_oidc_config() if auth_mode == "oidc" else None
         )
+        app.state.oidc_client = (
+            oidc.OidcClient(app.state.oidc_config)
+            if app.state.oidc_config is not None
+            else None
+        )
         session_secret = auth.session_secret(password)
         app.state.session_serializer = auth.serializer(
             session_secret
@@ -100,6 +105,7 @@ def create_app(
                     request,
                     response,
                     str(session["csrf_token"]),
+                    oidc.session_refresh_payload(session),
                 )
         return response
 

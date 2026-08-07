@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from krakendca.web import auth
+from krakendca.web import oidc
 from krakendca.web.schemas import ApiException, json_object_body, ok
 
 router = APIRouter(prefix="/api/session", tags=["session"])
@@ -12,6 +13,9 @@ router = APIRouter(prefix="/api/session", tags=["session"])
 
 @router.post("")
 async def login(request: Request):
+    if request.app.state.auth_mode != "password":
+        raise ApiException(404, "not_found", "Password login is not enabled.")
+
     auth.require_login_allowed(request)
     payload = await json_object_body(request)
     password = payload.get("password")
@@ -25,7 +29,11 @@ async def login(request: Request):
     auth.record_login_success(request)
     csrf_token = auth.new_csrf_token()
     response = ok({"authenticated": True, "csrf_token": csrf_token})
-    auth.set_session_cookie(request, response, csrf_token)
+    auth.set_session_cookie(
+        request,
+        response,
+        csrf_token,
+    )
     return response
 
 
@@ -37,7 +45,12 @@ async def current_session(request: Request):
 
     csrf_token = auth.new_csrf_token()
     response = ok({"authenticated": True, "csrf_token": csrf_token})
-    auth.set_session_cookie(request, response, csrf_token)
+    auth.set_session_cookie(
+        request,
+        response,
+        csrf_token,
+        oidc.session_refresh_payload(session),
+    )
     return response
 
 

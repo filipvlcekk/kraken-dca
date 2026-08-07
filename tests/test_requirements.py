@@ -11,6 +11,7 @@ def test_runtime_dependencies_are_intentional() -> None:
         "fastapi",
         "httpx",
         "itsdangerous",
+        "joserfc",
         "uvicorn",
     }
 
@@ -23,6 +24,7 @@ def test_web_scheduler_dependencies_are_declared() -> None:
         "fastapi==",
         "httpx==",
         "itsdangerous==",
+        "joserfc==",
         "uvicorn==",
     ):
         assert package in requirements
@@ -40,7 +42,7 @@ def test_httpx2_is_not_a_runtime_dependency() -> None:
     assert "httpx2" not in requirements.lower()
 
 
-def test_dev_requirements_include_runtime_and_test_client_dependencies() -> None:
+def test_dev_requirements_include_test_client_dependencies() -> None:
     requirements = _read("requirements-dev.txt")
 
     assert "-r requirements.txt" in requirements

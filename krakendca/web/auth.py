@@ -164,8 +164,12 @@ def record_login_success(request: Request) -> None:
 def encode_session(
     signer: URLSafeTimedSerializer,
     csrf_token: str,
+    extra_payload: Mapping[str, Any] | None = None,
 ) -> str:
-    return signer.dumps({"authenticated": True, "csrf_token": csrf_token})
+    payload = {"authenticated": True, "csrf_token": csrf_token}
+    if extra_payload:
+        payload.update(extra_payload)
+    return signer.dumps(payload)
 
 
 def decode_session(request: Request) -> dict[str, Any] | None:
@@ -180,6 +184,9 @@ def decode_session(request: Request) -> dict[str, Any] | None:
         return None
 
     if not payload.get("authenticated") or not payload.get("csrf_token"):
+        return None
+    reauth_after = payload.get("reauth_after")
+    if isinstance(reauth_after, (int, float)) and reauth_after <= time.time():
         return None
     request.state.authenticated_session = payload
     return payload
@@ -213,8 +220,13 @@ def set_session_cookie(
     request: Request,
     response: Response,
     csrf_token: str,
+    extra_payload: Mapping[str, Any] | None = None,
 ) -> None:
-    cookie = encode_session(request.app.state.session_serializer, csrf_token)
+    cookie = encode_session(
+        request.app.state.session_serializer,
+        csrf_token,
+        extra_payload,
+    )
     response.set_cookie(
         COOKIE_NAME,
         cookie,
