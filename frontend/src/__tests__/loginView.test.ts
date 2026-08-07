@@ -9,6 +9,8 @@ describe('LoginView', () => {
       props: {
         loading: false,
         error: null,
+        authMode: 'password',
+        oidcLoginUrl: null,
       },
     })
 
@@ -23,10 +25,30 @@ describe('LoginView', () => {
       props: {
         loading: true,
         error: 'Invalid password.',
+        authMode: 'password',
+        oidcLoginUrl: null,
       },
     })
 
     expect(wrapper.text()).toContain('Invalid password.')
     expect(wrapper.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(true)
+  })
+
+  it('renders only a Pocket ID button in OIDC mode', async () => {
+    const wrapper = mount(LoginView, {
+      props: {
+        loading: false,
+        error: null,
+        authMode: 'oidc',
+        oidcLoginUrl: '/api/auth/oidc/start',
+      },
+    })
+
+    expect(wrapper.find('input[aria-label="Web UI password"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Sign in with Pocket ID')
+
+    await wrapper.get('button[type="button"]').trigger('click')
+
+    expect(wrapper.emitted('oidc-login')).toEqual([['/api/auth/oidc/start']])
   })
 })

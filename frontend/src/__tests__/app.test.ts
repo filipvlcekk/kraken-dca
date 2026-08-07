@@ -27,6 +27,7 @@ describe('auth store', () => {
       data: {
         authenticated: true,
         csrf_token: 'csrf-token',
+        auth_mode: 'password',
       },
     }))
     const store = createAuthStore()
@@ -37,6 +38,26 @@ describe('auth store', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/session', expect.objectContaining({ method: 'GET' }))
     expect(store.state.authenticated).toBe(true)
     expect(store.state.csrfToken).toBe('csrf-token')
+    expect(store.state.authMode).toBe('password')
+  })
+
+  it('stores OIDC login capabilities from session restore', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      ok: true,
+      data: {
+        authenticated: false,
+        auth_mode: 'oidc',
+        oidc_login_url: '/api/auth/oidc/start',
+      },
+    }))
+    const store = createAuthStore()
+
+    const restored = await store.restore()
+
+    expect(restored).toBe(false)
+    expect(store.state.authenticated).toBe(false)
+    expect(store.state.authMode).toBe('oidc')
+    expect(store.state.oidcLoginUrl).toBe('/api/auth/oidc/start')
   })
 })
 
@@ -57,6 +78,7 @@ describe('App shell', () => {
       ok: true,
       data: {
         authenticated: false,
+        auth_mode: 'password',
       },
     }))
 
@@ -66,6 +88,27 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Sign in to Kraken DCA')
     expect(wrapper.find('input[aria-label="Web UI password"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Authenticated dashboard')
+  })
+
+  it('renders OIDC-only login and redirects to Pocket ID start', async () => {
+    const location = { href: 'https://testserver/login' }
+    vi.stubGlobal('location', location)
+    fetchMock.mockResolvedValue(jsonResponse({
+      ok: true,
+      data: {
+        authenticated: false,
+        auth_mode: 'oidc',
+        oidc_login_url: '/api/auth/oidc/start',
+      },
+    }))
+
+    const wrapper = mount(App)
+    await flushDashboard()
+
+    expect(wrapper.find('input[aria-label="Web UI password"]').exists()).toBe(false)
+    await wrapper.get('button[type="button"]').trigger('click')
+
+    expect(location.href).toBe('/api/auth/oidc/start')
   })
 
   it('renders the authenticated dashboard after session restore', async () => {

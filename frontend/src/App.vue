@@ -37,6 +37,10 @@ async function handleLogin(password: string): Promise<void> {
   }
 }
 
+function handleOidcLogin(url: string): void {
+  window.location.href = url
+}
+
 async function handleLogout(): Promise<void> {
   await auth.logout()
 }
@@ -85,7 +89,10 @@ function pairFieldErrors(index: number): Record<string, string> {
       v-else-if="!auth.state.authenticated"
       :loading="auth.state.loginPending"
       :error="auth.state.error"
+      :auth-mode="auth.state.authMode"
+      :oidc-login-url="auth.state.oidcLoginUrl"
       @login="handleLogin"
+      @oidc-login="handleOidcLogin"
     />
 
     <section v-else class="dashboard">

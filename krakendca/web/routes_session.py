@@ -41,10 +41,16 @@ async def login(request: Request):
 async def current_session(request: Request):
     session = auth.decode_session(request)
     if session is None:
-        return ok({"authenticated": False})
+        return ok(_session_response(request, authenticated=False))
 
     csrf_token = auth.new_csrf_token()
-    response = ok({"authenticated": True, "csrf_token": csrf_token})
+    response = ok(
+        _session_response(
+            request,
+            authenticated=True,
+            csrf_token=csrf_token,
+        )
+    )
     auth.set_session_cookie(
         request,
         response,
@@ -66,3 +72,19 @@ async def logout(request: Request):
         secure=request.app.state.cookie_secure,
     )
     return response
+
+
+def _session_response(
+    request: Request,
+    authenticated: bool,
+    csrf_token: str | None = None,
+) -> dict:
+    data = {
+        "authenticated": authenticated,
+        "auth_mode": request.app.state.auth_mode,
+    }
+    if request.app.state.auth_mode == "oidc":
+        data["oidc_login_url"] = "/api/auth/oidc/start"
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+    return data

@@ -10,6 +10,8 @@ import {
 
 export type AuthStoreState = {
   authenticated: boolean
+  authMode: 'password' | 'oidc' | null
+  oidcLoginUrl: string | null
   csrfToken: string | null
   restoring: boolean
   loginPending: boolean
@@ -31,6 +33,8 @@ export function createAuthStore(api: Partial<AuthStoreApi> = {}) {
   }
   const state = reactive<AuthStoreState>({
     authenticated: false,
+    authMode: null,
+    oidcLoginUrl: null,
     csrfToken: null,
     restoring: false,
     loginPending: false,
@@ -99,6 +103,8 @@ export function createAuthStore(api: Partial<AuthStoreApi> = {}) {
 
   function applySession(session: SessionResponse): void {
     state.authenticated = session.authenticated
+    state.authMode = session.auth_mode ?? state.authMode
+    state.oidcLoginUrl = session.oidc_login_url ?? null
     state.csrfToken = session.csrf_token ?? null
     if (!session.authenticated) {
       state.csrfToken = null

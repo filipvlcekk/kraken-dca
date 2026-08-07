@@ -99,6 +99,8 @@ export type RunResult = {
 
 export type SessionResponse = {
   authenticated: boolean
+  auth_mode?: 'password' | 'oidc'
+  oidc_login_url?: string
   csrf_token?: string
 }
 

@@ -170,7 +170,11 @@ def test_oidc_mode_does_not_require_web_ui_password(
         response = client.get("/api/session")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "data": {"authenticated": False}}
+    assert response.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "oidc",
+        "oidc_login_url": "/api/auth/oidc/start",
+    }
 
 
 @pytest.mark.parametrize(
@@ -514,9 +518,10 @@ def test_expired_oidc_session_requires_reauthentication(
         config_response = client.get("/api/config")
 
     assert session_response.status_code == 200
-    assert session_response.json() == {
-        "ok": True,
-        "data": {"authenticated": False},
+    assert session_response.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "oidc",
+        "oidc_login_url": "/api/auth/oidc/start",
     }
     assert config_response.status_code == 401
 
@@ -627,7 +632,33 @@ def test_unauthenticated_session_probe_returns_false(
         response = client.get("/api/session")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "data": {"authenticated": False}}
+    assert response.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "password",
+    }
+
+
+def test_unauthenticated_oidc_session_probe_returns_login_capabilities(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get("/api/session")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "data": {
+            "authenticated": False,
+            "auth_mode": "oidc",
+            "oidc_login_url": "/api/auth/oidc/start",
+        },
+    }
 
 
 def test_login_sets_signed_http_only_strict_secure_cookie_by_default(
@@ -698,9 +729,9 @@ def test_expired_session_cookie_is_rejected(tmp_path, monkeypatch) -> None:
         config_response = client.get("/api/config")
 
     assert session_response.status_code == 200
-    assert session_response.json() == {
-        "ok": True,
-        "data": {"authenticated": False},
+    assert session_response.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "password",
     }
     assert config_response.status_code == 401
     assert config_response.json()["error"]["code"] == "unauthenticated"
@@ -951,7 +982,10 @@ def test_logout_clears_session_cookie(tmp_path, monkeypatch) -> None:
     assert "kraken_dca_session=" in response.headers["set-cookie"]
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert "Path=/" in response.headers["set-cookie"]
-    assert restored.json() == {"ok": True, "data": {"authenticated": False}}
+    assert restored.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "password",
+    }
 
 
 def test_api_requires_auth_except_session_probe(tmp_path, monkeypatch) -> None:

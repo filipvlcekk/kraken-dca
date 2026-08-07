@@ -4,16 +4,25 @@ import { ref } from 'vue'
 defineProps<{
   loading: boolean
   error: string | null
+  authMode: 'password' | 'oidc' | null
+  oidcLoginUrl: string | null
 }>()
 
 const emit = defineEmits<{
   login: [password: string]
+  'oidc-login': [url: string]
 }>()
 
 const password = ref('')
 
 function submit(): void {
   emit('login', password.value)
+}
+
+function startOidcLogin(url: string | null): void {
+  if (url !== null) {
+    emit('oidc-login', url)
+  }
 }
 </script>
 
@@ -27,7 +36,17 @@ function submit(): void {
       manual execution from the same container runtime.
     </p>
 
-    <form class="login-form" @submit.prevent="submit">
+    <div v-if="authMode === 'oidc'" class="login-form">
+      <button
+        type="button"
+        :disabled="loading || oidcLoginUrl === null"
+        @click="startOidcLogin(oidcLoginUrl)"
+      >
+        Sign in with Pocket ID
+      </button>
+    </div>
+
+    <form v-else class="login-form" @submit.prevent="submit">
       <label>
         Web UI password
         <input
