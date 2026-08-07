@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http.cookies import SimpleCookie
+from urllib.parse import parse_qs, urlparse
 
 import itsdangerous.timed
 import pytest
@@ -138,6 +139,46 @@ def test_oidc_mode_requires_oidc_configuration(
     with pytest.raises(RuntimeError, match=missing_env):
         with TestClient(app, base_url="https://testserver"):
             pass
+
+
+def test_oidc_start_redirects_to_provider_and_sets_state_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/auth/oidc/start",
+            follow_redirects=False,
+        )
+
+    assert response.status_code in {302, 307}
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    query = parse_qs(parsed.query)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
+        "https://id.example.com/authorize"
+    )
+    assert query["response_type"] == ["code"]
+    assert query["client_id"] == ["client-id"]
+    assert query["redirect_uri"] == [
+        "https://app.example.com/api/auth/oidc/callback"
+    ]
+    assert query["scope"] == ["openid email profile groups"]
+    assert query["state"][0]
+    assert query["nonce"][0]
+
+    cookie = response.headers["set-cookie"]
+    assert "kraken_dca_oidc_state=" in cookie
+    assert "HttpOnly" in cookie
+    assert "Secure" in cookie
+    assert "SameSite=lax" in cookie
+    assert "Path=/api/auth/oidc" in cookie
+    assert "Max-Age=600" in cookie
 
 
 def test_startup_requires_web_ui_session_secret(tmp_path, monkeypatch) -> None:
