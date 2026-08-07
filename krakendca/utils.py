@@ -1,4 +1,5 @@
 """Utilities functions module."""
+import time
 from datetime import datetime, timezone
 
 
@@ -10,10 +11,10 @@ def utc_unix_time_datetime(nix_time: int) -> datetime:
     :return: Converted date as string.
     """
     try:
-        date = datetime.utcfromtimestamp(nix_time)
-    except OSError:  # Case when unix time is in nanoseconds
-        date = datetime.utcfromtimestamp(nix_time / 1000000000)
-    return date
+        date = datetime.fromtimestamp(nix_time, timezone.utc)
+    except (OSError, OverflowError):  # Case when unix time is in nanoseconds
+        date = datetime.fromtimestamp(nix_time / 1000000000, timezone.utc)
+    return date.replace(tzinfo=None)
 
 
 def current_utc_datetime() -> datetime:
@@ -22,7 +23,10 @@ def current_utc_datetime() -> datetime:
 
     :return: Current date as Datetime.
     """
-    return datetime.utcnow().replace(tzinfo=None, microsecond=0)
+    return datetime.fromtimestamp(time.time(), timezone.utc).replace(
+        tzinfo=None,
+        microsecond=0,
+    )
 
 
 def current_utc_day_datetime() -> datetime:

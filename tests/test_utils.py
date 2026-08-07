@@ -18,6 +18,7 @@ def test_utc_unix_time_datetime() -> None:
     date_test = utc_unix_time_datetime(1617721936)
     date = datetime(2021, 4, 6, 15, 12, 16)
     assert date_test == date
+    assert date_test.tzinfo is None
 
     # Test non utc (utc+2) time in second.
     date_test = utc_unix_time_datetime(1617714736)
@@ -28,6 +29,13 @@ def test_utc_unix_time_datetime() -> None:
     date_test = utc_unix_time_datetime(1617728136000000000)
     date = datetime(2021, 4, 6, 16, 55, 36)
     assert date_test == date
+    assert date_test.tzinfo is None
+
+    # Test utc unix time in nanoseconds with microsecond precision.
+    date_test = utc_unix_time_datetime(1617728136123456789)
+    date = datetime(2021, 4, 6, 16, 55, 36, 123457)
+    assert date_test == date
+    assert date_test.tzinfo is None
 
     # Raise an error if datetime not in second or nanosecond.
     with pytest.raises(ValueError) as e_info:
@@ -39,14 +47,18 @@ def test_utc_unix_time_datetime() -> None:
 def test_current_utc_datetime() -> None:
     # Test current time in utc without microseconds.
     date = datetime(2012, 1, 14, 18, 10, 34)
-    assert current_utc_datetime() == date
+    current_date = current_utc_datetime()
+    assert current_date == date
+    assert current_date.tzinfo is None
 
 
 @freeze_time("2012-01-13 23:10:34.069731", tz_offset=2)
 def test_current_utc_day_datetime() -> None:
     # Test current time truncated to utc day.
     date = datetime(2012, 1, 13)
-    assert current_utc_day_datetime() == date
+    current_date = current_utc_day_datetime()
+    assert current_date == date
+    assert current_date.tzinfo is None
 
 
 def test_datetime_as_utc_unix() -> None:
