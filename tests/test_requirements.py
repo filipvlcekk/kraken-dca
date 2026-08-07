@@ -30,3 +30,15 @@ def test_croniter_uses_current_stable_release() -> None:
     requirements = Path("requirements.txt").read_text()
 
     assert "croniter==6.2.4" in requirements
+
+
+def test_fastapi_uses_current_stable_release() -> None:
+    requirements = Path("requirements.txt").read_text()
+
+    assert "fastapi==0.141.1" in requirements
+
+
+def test_uvicorn_uses_current_stable_release() -> None:
+    requirements = Path("requirements.txt").read_text()
+
+    assert "uvicorn==0.52.1" in requirements
