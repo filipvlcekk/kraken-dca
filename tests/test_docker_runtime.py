@@ -30,12 +30,17 @@ def test_dockerfile_builds_frontend_and_runs_web_app() -> None:
     ) in dockerfile
 
 
-def test_dockerfile_final_runtime_excludes_cron_node_and_baked_config() -> None:
+def test_dockerfile_final_runtime_excludes_cron_node_and_baked_config() -> (
+    None
+):
     dockerfile = _read("Dockerfile")
     final_stage = _final_stage(dockerfile)
     lower_final_stage = final_stage.lower()
 
-    assert "apt-get install --yes --no-install-recommends cron" not in lower_final_stage
+    assert (
+        "apt-get install --yes --no-install-recommends cron"
+        not in lower_final_stage
+    )
     assert "crontab" not in lower_final_stage
     assert 'CMD ["cron", "-f"]' not in final_stage
     assert "node" not in lower_final_stage
@@ -65,6 +70,9 @@ def test_readme_documents_docker_web_ui_runtime() -> None:
         "WEB_UI_PASSWORD",
         "WEB_UI_SESSION_SECRET",
         "WEB_UI_COOKIE_SECURE",
+        "openssl rand -base64 32",
+        "-e WEB_UI_SESSION_SECRET",
+        "-e WEB_UI_COOKIE_SECURE=true",
         "-p 8080:8080",
         "writable `config.yaml`",
         "writable `orders.csv`",
@@ -112,5 +120,7 @@ def _read(relative_path: str) -> str:
 
 
 def _final_stage(dockerfile: str) -> str:
-    starts = [match.start() for match in re.finditer(r"(?im)^FROM\s+", dockerfile)]
+    starts = [
+        match.start() for match in re.finditer(r"(?im)^FROM\s+", dockerfile)
+    ]
     return dockerfile[starts[-1]:]

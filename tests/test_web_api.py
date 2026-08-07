@@ -14,6 +14,8 @@ from krakendca.config_store import REDACTED_SECRET
 from krakendca.runner import RunResult
 from krakendca.web.app import create_app
 
+TEST_SESSION_SECRET = "test-session-secret-value-32-bytes"
+
 
 def valid_config(pair: str = "XETHZEUR") -> dict:
     return {
@@ -88,20 +90,25 @@ def reset_fake_scheduler(monkeypatch):
     FakeSchedulerService.instances = []
     FakeSchedulerService.reload_exception = None
     FakeSchedulerService.run_result = None
-    monkeypatch.setattr("krakendca.web.app.SchedulerService", FakeSchedulerService)
+    monkeypatch.setattr(
+        "krakendca.web.app.SchedulerService", FakeSchedulerService
+    )
     yield
 
 
 @pytest.fixture()
 def authed_client(tmp_path, monkeypatch):
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
 
     def _build(config: dict | str | None = None):
         path = str(tmp_path / "missing.yaml")
         if config is not None:
             path = write_config(tmp_path, config)
-        app = create_app(config_path=path, static_dir=str(tmp_path / "frontend"))
-        client = TestClient(app)
+        app = create_app(
+            config_path=path, static_dir=str(tmp_path / "frontend")
+        )
+        client = TestClient(app, base_url="https://testserver")
         client.__enter__()
         login = client.post("/api/session", json={"password": "secret"})
         csrf_token = login.json()["data"]["csrf_token"]
@@ -245,11 +252,14 @@ def test_invalid_utf8_config_enters_degraded_mode_without_leaking_bytes(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"
     config_path.write_bytes(b"api:\n  private_key: \xff\n")
-    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+    app = create_app(
+        config_path=str(config_path), static_dir=str(tmp_path / "frontend")
+    )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         login = client.post("/api/session", json={"password": "secret"})
         response = client.get("/api/config")
         scheduler_response = client.get("/api/scheduler")
@@ -289,6 +299,7 @@ def test_yaml_parser_error_text_is_sanitized_in_degraded_config_response(
 ) -> None:
     secret = "-----BEGIN FAKE PRIVATE KEY-----"
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         f'api:\n  private_key: "{secret}\ndca_pairs: []\n',
@@ -302,9 +313,11 @@ def test_yaml_parser_error_text_is_sanitized_in_degraded_config_response(
         "krakendca.web.app.load_config_preserving_root",
         raise_parser_error,
     )
-    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+    app = create_app(
+        config_path=str(config_path), static_dir=str(tmp_path / "frontend")
+    )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         login = client.post("/api/session", json={"password": "secret"})
         response = client.get("/api/config")
 
@@ -340,7 +353,9 @@ def test_put_config_requires_valid_csrf(authed_client) -> None:
     assert response.json()["error"]["code"] == "csrf_invalid"
 
 
-def test_put_config_rejects_malformed_json_with_api_envelope(authed_client) -> None:
+def test_put_config_rejects_malformed_json_with_api_envelope(
+    authed_client,
+) -> None:
     client, _path, csrf = authed_client(valid_config())
 
     response = client.put(
@@ -354,7 +369,9 @@ def test_put_config_rejects_malformed_json_with_api_envelope(authed_client) -> N
     assert response.json()["error"]["code"] == "validation_error"
 
 
-def test_put_config_rejects_invalid_utf8_json_with_api_envelope(authed_client) -> None:
+def test_put_config_rejects_invalid_utf8_json_with_api_envelope(
+    authed_client,
+) -> None:
     client, _path, csrf = authed_client(valid_config())
 
     response = client.put(
@@ -369,7 +386,9 @@ def test_put_config_rejects_invalid_utf8_json_with_api_envelope(authed_client) -
     assert response.json()["error"]["code"] == "validation_error"
 
 
-def test_put_config_rejects_non_object_json_with_api_envelope(authed_client) -> None:
+def test_put_config_rejects_non_object_json_with_api_envelope(
+    authed_client,
+) -> None:
     client, _path, csrf = authed_client(valid_config())
 
     response = client.put(
@@ -411,9 +430,12 @@ def test_put_config_saves_and_returns_required_scheduler_contract(
     with open(path, encoding="utf-8") as saved_file:
         saved = yaml.safe_load(saved_file)
     assert saved["dca_pairs"][0]["pair"] == "XXBTZEUR"
-    assert FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
-        "pair"
-    ] == "XXBTZEUR"
+    assert (
+        FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
+            "pair"
+        ]
+        == "XXBTZEUR"
+    )
 
 
 def test_put_config_validation_error_returns_400(authed_client) -> None:
@@ -445,11 +467,10 @@ def test_put_config_rejects_unsafe_orders_filepath(authed_client) -> None:
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "validation_error"
-    assert response.json()["error"]["fields"] == {
-        "orders_filepath": (
-            "orders_filepath must be a relative CSV filename without directories."
-        )
-    }
+    expected = (
+        "orders_filepath must be a relative CSV filename without directories."
+    )
+    assert response.json()["error"]["fields"] == {"orders_filepath": expected}
 
 
 def test_put_config_malformed_existing_yaml_error_does_not_leak_secret(
@@ -494,7 +515,9 @@ def test_put_config_invalid_utf8_existing_config_returns_validation_error(
     assert "\\ufffd" not in json.dumps(body)
 
 
-def test_put_config_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:
+def test_put_config_parser_error_text_is_sanitized(
+    authed_client, monkeypatch
+) -> None:
     secret = "-----BEGIN FAKE PRIVATE KEY-----"
     client, _path, csrf = authed_client(valid_config())
 
@@ -581,9 +604,12 @@ def test_reload_reads_saved_config_not_client_payload(authed_client) -> None:
     assert set(data) == {"scheduler"}
     assert data["scheduler"]["config_applied"] is True
     assert _scheduler_contract_keys().issubset(data["scheduler"])
-    assert FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
-        "pair"
-    ] == "XETHZEUR"
+    assert (
+        FakeSchedulerService.instances[0].reload_calls[0]["dca_pairs"][0][
+            "pair"
+        ]
+        == "XETHZEUR"
+    )
 
 
 def test_asset_pair_search_returns_canonical_pair_suggestions(
@@ -652,7 +678,9 @@ def test_reload_rejects_non_mapping_saved_config_with_validation_envelope(
     assert FakeSchedulerService.instances == []
 
 
-def test_reload_malformed_yaml_error_does_not_leak_secret(authed_client) -> None:
+def test_reload_malformed_yaml_error_does_not_leak_secret(
+    authed_client,
+) -> None:
     secret = "-----BEGIN FAKE PRIVATE KEY-----"
     client, _path, csrf = authed_client(
         f'api:\n  private_key: "{secret}\ndca_pairs: []\n',
@@ -669,16 +697,19 @@ def test_reload_malformed_yaml_error_does_not_leak_secret(authed_client) -> None
     assert secret not in json.dumps(body)
 
 
-def test_reload_invalid_utf8_config_returns_validation_error_without_leaking_bytes(
+def test_reload_invalid_utf8_config_returns_validation_error(
     tmp_path,
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
     config_path = tmp_path / "config.yaml"
     config_path.write_bytes(b"api:\n  private_key: \xff\n")
-    app = create_app(config_path=str(config_path), static_dir=str(tmp_path / "frontend"))
+    app = create_app(
+        config_path=str(config_path), static_dir=str(tmp_path / "frontend")
+    )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         login = client.post("/api/session", json={"password": "secret"})
         csrf = login.json()["data"]["csrf_token"]
         response = client.post(
@@ -696,7 +727,9 @@ def test_reload_invalid_utf8_config_returns_validation_error_without_leaking_byt
     assert FakeSchedulerService.instances == []
 
 
-def test_reload_parser_error_text_is_sanitized(authed_client, monkeypatch) -> None:
+def test_reload_parser_error_text_is_sanitized(
+    authed_client, monkeypatch
+) -> None:
     secret = "-----BEGIN FAKE PRIVATE KEY-----"
     client, _path, csrf = authed_client(valid_config())
 

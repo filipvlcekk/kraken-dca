@@ -18,9 +18,17 @@ from krakendca.web.schemas import ApiException
 COOKIE_NAME = "kraken_dca_session"
 SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 SESSION_SALT = "kraken-dca-web-session"
+SESSION_SECRET_MIN_LENGTH = 32
 LOGIN_MAX_FAILURES = 5
 LOGIN_GLOBAL_MAX_FAILURES = 50
 LOGIN_WINDOW_SECONDS = 5 * 60
+WEAK_SESSION_SECRETS = {
+    "change-me",
+    "changeme",
+    "password",
+    "secret",
+}
+WEAK_SESSION_SECRET_PREFIXES = ("change-me",)
 
 
 class LoginThrottle:
@@ -81,13 +89,27 @@ def require_web_password(env: Mapping[str, str] | None = None) -> str:
 
 
 def session_secret(password: str, env: Mapping[str, str] | None = None) -> str:
+    del password
     values = os.environ if env is None else env
-    return values.get("WEB_UI_SESSION_SECRET") or password
+    secret = (values.get("WEB_UI_SESSION_SECRET") or "").strip()
+    if not secret:
+        raise RuntimeError("WEB_UI_SESSION_SECRET is required for web mode.")
+    if (
+        len(secret) < SESSION_SECRET_MIN_LENGTH
+        or secret.lower() in WEAK_SESSION_SECRETS
+        or secret.lower().startswith(WEAK_SESSION_SECRET_PREFIXES)
+    ):
+        raise RuntimeError(
+            "WEB_UI_SESSION_SECRET must be a high-entropy value "
+            f"with at least {SESSION_SECRET_MIN_LENGTH} characters.",
+        )
+    return secret
 
 
 def cookie_secure(env: Mapping[str, str] | None = None) -> bool:
     values = os.environ if env is None else env
-    return values.get("WEB_UI_COOKIE_SECURE", "").lower() == "true"
+    value = values.get("WEB_UI_COOKIE_SECURE", "true").strip().lower()
+    return value not in {"false", "0", "no", "off"}
 
 
 def serializer(secret: str) -> URLSafeTimedSerializer:
@@ -181,6 +203,7 @@ def set_session_cookie(
         cookie,
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
+        path="/",
         samesite="strict",
         secure=request.app.state.cookie_secure,
     )

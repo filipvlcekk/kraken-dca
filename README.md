@@ -166,10 +166,13 @@ chown 10001:10001 orders.csv
 ```
 To start the Docker web UI use:
 ```sh
+export WEB_UI_SESSION_SECRET="$(openssl rand -base64 32)"
 docker run -p 8080:8080 \
   -v CONFIGURATION_FILE_PATH:/app/config.yaml \
   -v ORDERS_FILE_PATH:/app/orders.csv \
   -e WEB_UI_PASSWORD=change-me \
+  -e WEB_UI_SESSION_SECRET="$WEB_UI_SESSION_SECRET" \
+  -e WEB_UI_COOKIE_SECURE=true \
   -e TZ=UTC \
   --name kraken-dca \
   --restart=on-failure \
@@ -178,9 +181,14 @@ docker run -p 8080:8080 \
 - **CONFIGURATION_FILE_PATH**: writable `config.yaml` filepath (e.g., *~/dev/config.yaml*). Web UI mode writes this file, so do not mount it read-only.
 - **ORDERS_FILE_PATH**: writable `orders.csv` order history filepath (e.g., *~/dev/orders.csv*).
 - **WEB_UI_PASSWORD**: Required password for the browser UI.
-- **WEB_UI_SESSION_SECRET**: Optional signing secret for sessions. If omitted, `WEB_UI_PASSWORD` is used.
-- **WEB_UI_COOKIE_SECURE**: Optional. Set to `true` when serving the UI through HTTPS.
+- **WEB_UI_SESSION_SECRET**: Required high-entropy signing secret for sessions. Generate it with a secret manager or `openssl rand -base64 32`.
+- **WEB_UI_COOKIE_SECURE**: Defaults to `true` so session cookies are sent only over HTTPS. Set to `false` only for local HTTP development.
 - **TZ**: Recommended timezone for deterministic cron scheduling and logs.
+
+Keep `WEB_UI_COOKIE_SECURE=true` when the container is served through an HTTPS
+reverse proxy such as Coolify or Traefik. If you access the container directly
+through `http://host:8080` for local development, set `WEB_UI_COOKIE_SECURE=false`
+for that local run.
 
 Prefer supplying Kraken credentials through a mounted `config.yaml` that is generated from your secret store or environment outside the repository, rather than committing secrets into version control.
 

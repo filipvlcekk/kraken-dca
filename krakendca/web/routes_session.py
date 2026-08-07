@@ -16,7 +16,9 @@ async def login(request: Request):
     payload = await json_object_body(request)
     password = payload.get("password")
     expected = request.app.state.web_ui_password
-    if not isinstance(password, str) or not auth.verify_password(password, expected):
+    if not isinstance(password, str) or not auth.verify_password(
+        password, expected
+    ):
         auth.record_login_failure(request)
         raise ApiException(401, "unauthenticated", "Invalid password.")
 
@@ -46,6 +48,7 @@ async def logout(request: Request):
     response.delete_cookie(
         auth.COOKIE_NAME,
         httponly=True,
+        path="/",
         samesite="strict",
         secure=request.app.state.cookie_secure,
     )
