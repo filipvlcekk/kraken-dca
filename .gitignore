@@ -2,6 +2,10 @@
 .idea/
 __pycache__/
 .venv/
+.claude/
+.gitnexus/
+AGENTS.md
+CLAUDE.md
 config.yaml
 config.yaml.dev
 orders.csv
