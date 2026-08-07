@@ -67,10 +67,18 @@ def test_readme_documents_docker_web_ui_runtime() -> None:
     readme = _read("README.md")
 
     for required in (
-        "WEB_UI_PASSWORD",
+        "WEB_UI_AUTH_MODE=oidc",
+        "WEB_UI_OIDC_ISSUER",
+        "WEB_UI_OIDC_CLIENT_ID",
+        "WEB_UI_OIDC_CLIENT_SECRET",
+        "WEB_UI_OIDC_REDIRECT_URL",
+        "WEB_UI_OIDC_ALLOWED_GROUP",
+        "kraken-dca-admins",
+        "/api/auth/oidc/callback",
         "WEB_UI_SESSION_SECRET",
         "WEB_UI_COOKIE_SECURE",
         "openssl rand -base64 32",
+        "-e WEB_UI_AUTH_MODE=oidc",
         "-e WEB_UI_SESSION_SECRET",
         "-e WEB_UI_COOKIE_SECURE=true",
         "-p 8080:8080",
@@ -84,6 +92,8 @@ def test_readme_documents_docker_web_ui_runtime() -> None:
     ):
         assert required in readme
 
+    assert "WEB_UI_AUTH_MODE=password" in readme
+    assert "local development" in readme
     assert "read-only" in readme
     assert "legacy CLI/cron mode" in readme
 

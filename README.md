@@ -155,7 +155,8 @@ docker pull futurbroke/kraken-dca:latest
 ```
 The default Docker runtime runs the web UI and scheduler in one container on port
 8080. The container runs as an unprivileged user (`uid 10001`, `gid 10001`) and
-requires `WEB_UI_PASSWORD` for browser login.
+uses explicit authentication mode configuration. Use Pocket ID/OIDC for
+production browser login.
 
 Create writable files on the host if you want persistent config and order history:
 ```sh
@@ -170,7 +171,12 @@ export WEB_UI_SESSION_SECRET="$(openssl rand -base64 32)"
 docker run -p 8080:8080 \
   -v CONFIGURATION_FILE_PATH:/app/config.yaml \
   -v ORDERS_FILE_PATH:/app/orders.csv \
-  -e WEB_UI_PASSWORD=change-me \
+  -e WEB_UI_AUTH_MODE=oidc \
+  -e WEB_UI_OIDC_ISSUER=https://pocketid.example.com \
+  -e WEB_UI_OIDC_CLIENT_ID=kraken-dca \
+  -e WEB_UI_OIDC_CLIENT_SECRET=change-me \
+  -e WEB_UI_OIDC_REDIRECT_URL=https://kraken-dca.example.com/api/auth/oidc/callback \
+  -e WEB_UI_OIDC_ALLOWED_GROUP=kraken-dca-admins \
   -e WEB_UI_SESSION_SECRET="$WEB_UI_SESSION_SECRET" \
   -e WEB_UI_COOKIE_SECURE=true \
   -e TZ=UTC \
@@ -180,15 +186,30 @@ docker run -p 8080:8080 \
 ```
 - **CONFIGURATION_FILE_PATH**: writable `config.yaml` filepath (e.g., *~/dev/config.yaml*). Web UI mode writes this file, so do not mount it read-only.
 - **ORDERS_FILE_PATH**: writable `orders.csv` order history filepath (e.g., *~/dev/orders.csv*).
-- **WEB_UI_PASSWORD**: Required password for the browser UI.
+- **WEB_UI_AUTH_MODE**: Required. Use `oidc` for production Pocket ID login. Use `password` only for local development.
+- **WEB_UI_OIDC_ISSUER**: Pocket ID base URL, for example `https://pocketid.example.com`.
+- **WEB_UI_OIDC_CLIENT_ID**: Pocket ID OIDC client ID.
+- **WEB_UI_OIDC_CLIENT_SECRET**: Pocket ID OIDC client secret. Store it as a runtime secret.
+- **WEB_UI_OIDC_REDIRECT_URL**: Public callback URL registered in Pocket ID, for example `https://kraken-dca.example.com/api/auth/oidc/callback`.
+- **WEB_UI_OIDC_ALLOWED_GROUP**: Required Pocket ID group claim value, for example `kraken-dca-admins`.
 - **WEB_UI_SESSION_SECRET**: Required high-entropy signing secret for sessions. Generate it with a secret manager or `openssl rand -base64 32`.
 - **WEB_UI_COOKIE_SECURE**: Defaults to `true` so session cookies are sent only over HTTPS. Set to `false` only for local HTTP development.
 - **TZ**: Recommended timezone for deterministic cron scheduling and logs.
+
+Create a Pocket ID OIDC client with callback URL:
+```text
+https://<kraken-dca-host>/api/auth/oidc/callback
+```
+Grant scopes `openid email profile groups`, and assign authorized users to the
+group configured in `WEB_UI_OIDC_ALLOWED_GROUP`.
 
 Keep `WEB_UI_COOKIE_SECURE=true` when the container is served through an HTTPS
 reverse proxy such as Coolify or Traefik. If you access the container directly
 through `http://host:8080` for local development, set `WEB_UI_COOKIE_SECURE=false`
 for that local run.
+
+For local development without Pocket ID, set `WEB_UI_AUTH_MODE=password` and
+provide `WEB_UI_PASSWORD`. Do not use password mode for production.
 
 Prefer supplying Kraken credentials through a mounted `config.yaml` that is generated from your secret store or environment outside the repository, rather than committing secrets into version control.
 
