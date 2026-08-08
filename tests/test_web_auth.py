@@ -526,6 +526,32 @@ def test_expired_oidc_session_requires_reauthentication(
     assert config_response.status_code == 401
 
 
+def test_oidc_mode_rejects_legacy_password_session_cookie(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+    legacy_password_cookie = auth.serializer(TEST_SESSION_SECRET).dumps(
+        {"authenticated": True, "csrf_token": auth.new_csrf_token()},
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.cookies.set(auth.COOKIE_NAME, legacy_password_cookie)
+        session_response = client.get("/api/session")
+        config_response = client.get("/api/config")
+
+    assert session_response.status_code == 200
+    assert session_response.json()["data"] == {
+        "authenticated": False,
+        "auth_mode": "oidc",
+        "oidc_login_url": "/api/auth/oidc/start",
+    }
+    assert config_response.status_code == 401
+
+
 def test_password_login_is_disabled_in_oidc_mode(
     tmp_path,
     monkeypatch,

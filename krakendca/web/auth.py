@@ -185,6 +185,8 @@ def decode_session(request: Request) -> dict[str, Any] | None:
 
     if not payload.get("authenticated") or not payload.get("csrf_token"):
         return None
+    if not _session_matches_auth_mode(request, payload):
+        return None
     reauth_after = payload.get("reauth_after")
     if isinstance(reauth_after, (int, float)) and reauth_after <= time.time():
         return None
@@ -222,10 +224,13 @@ def set_session_cookie(
     csrf_token: str,
     extra_payload: Mapping[str, Any] | None = None,
 ) -> None:
+    base_payload = {"auth_mode": request.app.state.auth_mode}
+    if extra_payload:
+        base_payload.update(extra_payload)
     cookie = encode_session(
         request.app.state.session_serializer,
         csrf_token,
-        extra_payload,
+        base_payload,
     )
     response.set_cookie(
         COOKIE_NAME,
@@ -242,3 +247,14 @@ def _client_key(request: Request) -> str:
     if request.client is None:
         return "unknown"
     return request.client.host or "unknown"
+
+
+def _session_matches_auth_mode(
+    request: Request,
+    payload: Mapping[str, Any],
+) -> bool:
+    auth_mode = getattr(request.app.state, "auth_mode", None)
+    payload_mode = payload.get("auth_mode")
+    if auth_mode == "password":
+        return payload_mode in {None, "password"}
+    return payload_mode == auth_mode
