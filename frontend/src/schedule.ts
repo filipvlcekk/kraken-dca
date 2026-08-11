@@ -107,7 +107,13 @@ export function cronRunsMoreFrequentlyThan(
   if (minIntervalMinutes <= 0) {
     return false
   }
-  const [first, second] = previewNextRuns(cron, timezone, 2)
+  let first: string | undefined
+  let second: string | undefined
+  try {
+    [first, second] = previewNextRuns(cron, timezone, 2)
+  } catch {
+    return false
+  }
   if (first === undefined || second === undefined) {
     return false
   }

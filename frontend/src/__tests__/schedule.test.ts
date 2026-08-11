@@ -66,4 +66,10 @@ describe('schedule helpers', () => {
     expect(cronRunsMoreFrequentlyThan('0 */6 * * *', 'UTC', 30)).toBe(false)
     expect(cronRunsMoreFrequentlyThan('*/15 * * * *', 'UTC', 0)).toBe(false)
   })
+
+  it('does not throw when checking frequency with an invalid timezone', () => {
+    const invalidTimezone = Symbol('invalid timezone') as unknown as string
+
+    expect(cronRunsMoreFrequentlyThan('*/15 * * * *', invalidTimezone, 30)).toBe(false)
+  })
 })

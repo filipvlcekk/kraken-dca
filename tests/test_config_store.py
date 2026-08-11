@@ -355,6 +355,40 @@ def test_partial_save_preserves_omitted_existing_file_credentials(
     assert saved["api"]["private_key"] == "FILE_PRIVATE_KEY"
 
 
+@pytest.mark.parametrize("api_value", [123, ["public_key"]])
+def test_save_config_rejects_truthy_non_mapping_api_without_type_error(
+    tmp_path,
+    api_value: object,
+) -> None:
+    path = tmp_path / "config.yaml"
+    submitted = valid_config()
+    submitted["api"] = api_value
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        save_config(str(path), submitted)
+
+    assert exc_info.value.fields == {"api": "API credentials must be an object."}
+
+
+@pytest.mark.parametrize("api_value", [123, ["public_key"]])
+def test_validate_config_rejects_non_mapping_api_even_with_env_fallback(
+    api_value: object,
+) -> None:
+    config = valid_config()
+    config["api"] = api_value
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(
+            config,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE",
+            },
+        )
+
+    assert exc_info.value.fields == {"api": "API credentials must be an object."}
+
+
 def test_env_secret_metadata_shape() -> None:
     config = {
         "dca_pairs": [{"pair": "XETHZEUR", "delay": 1, "amount": 15}]

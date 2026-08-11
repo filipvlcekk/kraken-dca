@@ -52,10 +52,14 @@ def validate_config(config: dict, env: dict | None = None) -> dict:
     normalized: dict = {}
     fields: dict[str, str] = {}
 
-    api = source.get("api") or {}
-    if not isinstance(api, dict):
-        api = {}
-    normalized["api"] = _validate_api(api, env_values, fields)
+    api = source.get("api")
+    if api is None:
+        normalized["api"] = _validate_api({}, env_values, fields)
+    elif not isinstance(api, dict):
+        fields["api"] = "API credentials must be an object."
+        normalized["api"] = {"public_key": None, "private_key": None}
+    else:
+        normalized["api"] = _validate_api(api, env_values, fields)
     if "orders_filepath" in source:
         _validate_orders_filepath(
             source.get("orders_filepath"),
@@ -127,8 +131,15 @@ def merge_redacted_config(
     """Merge submitted config with existing file secrets for redacted values."""
     del env
     merged = copy.deepcopy(submitted or {})
-    submitted_api = (submitted or {}).get("api") or {}
-    existing_api = (existing or {}).get("api") or {}
+    submitted_api = (submitted or {}).get("api")
+    if submitted_api is None:
+        submitted_api = {}
+    elif not isinstance(submitted_api, dict):
+        return merged
+
+    existing_api = (existing or {}).get("api")
+    if not isinstance(existing_api, dict):
+        existing_api = {}
 
     api: dict = {}
     for key in ("public_key", "private_key"):
