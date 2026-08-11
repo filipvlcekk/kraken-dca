@@ -19,6 +19,8 @@ class KrakenClient:
 
     _BASE_URL = "https://api.kraken.com"
     _USER_AGENT = "kraken-dca/1.0"
+    _nonce_lock = threading.Lock()
+    _last_nonce_by_key: dict[str, int] = {}
 
     api_public_key: str
     api_private_key: str
@@ -40,8 +42,6 @@ class KrakenClient:
             timeout=timeout,
             transport=transport,
         )
-        self._nonce_lock = threading.Lock()
-        self._last_nonce = 0
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -182,10 +182,12 @@ class KrakenClient:
 
     def _nonce(self) -> str:
         with self._nonce_lock:
+            key = self.api_public_key or ""
             nonce = int(time.time() * 1000)
-            if nonce <= self._last_nonce:
-                nonce = self._last_nonce + 1
-            self._last_nonce = nonce
+            last_nonce = self._last_nonce_by_key.get(key, 0)
+            if nonce <= last_nonce:
+                nonce = last_nonce + 1
+            self._last_nonce_by_key[key] = nonce
             return str(nonce)
 
     @staticmethod
