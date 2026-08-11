@@ -105,7 +105,7 @@ def redact_config(config: dict, env: dict | None = None) -> dict:
         if isinstance(file_value, str) and file_value:
             redacted_api[key] = REDACTED_SECRET
             secrets[key] = {"configured": True, "source": "file"}
-        elif file_value == "":
+        elif file_value is not None:
             redacted_api[key] = None
             secrets[key] = {"configured": False, "source": None}
         elif env_values.get(env_var):
@@ -249,10 +249,11 @@ def _validate_api_key(
     fields: dict[str, str],
 ) -> None:
     file_value = api.get(key)
-    if file_value == "":
-        fields[f"api.{key}"] = message
+    if file_value is None:
+        if not env_values.get(env_var):
+            fields[f"api.{key}"] = message
         return
-    if file_value is None and not env_values.get(env_var):
+    if not isinstance(file_value, str) or file_value == "":
         fields[f"api.{key}"] = message
 
 

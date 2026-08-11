@@ -545,6 +545,38 @@ def test_empty_string_credentials_are_invalid() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("public_key", 123, "Please provide your Kraken API public key."),
+        ("public_key", ["PUBLIC"], "Please provide your Kraken API public key."),
+        (
+            "private_key",
+            {"secret": "PRIVATE"},
+            "Please provide your Kraken API private key.",
+        ),
+    ],
+)
+def test_non_string_file_credentials_are_invalid_even_with_env_fallback(
+    key: str,
+    value: object,
+    message: str,
+) -> None:
+    config = valid_config()
+    config["api"][key] = value
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(
+            config,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE",
+            },
+        )
+
+    assert exc_info.value.fields == {f"api.{key}": message}
+
+
 def test_redact_config_redacts_credentials_without_validating_pairs() -> None:
     config = valid_config()
     config["dca_pairs"][0]["delay"] = "bad"
@@ -582,6 +614,39 @@ def test_redact_config_does_not_leak_empty_string_credentials() -> None:
 
     with pytest.raises(ConfigValidationError):
         validate_config(config)
+
+
+def test_redact_config_marks_non_string_file_credentials_unconfigured() -> None:
+    config = valid_config()
+    config["api"]["public_key"] = 123
+
+    result = redact_config(
+        config,
+        {
+            "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC",
+            "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE",
+        },
+    )
+
+    assert result["config"]["api"]["public_key"] is None
+    assert result["config"]["api"]["private_key"] == REDACTED_SECRET
+    assert result["secrets"]["public_key"] == {
+        "configured": False,
+        "source": None,
+    }
+    assert result["secrets"]["private_key"] == {
+        "configured": True,
+        "source": "file",
+    }
+
+    with pytest.raises(ConfigValidationError):
+        validate_config(
+            config,
+            {
+                "KRAKEN_API_PUBLIC_KEY": "ENV_PUBLIC",
+                "KRAKEN_API_PRIVATE_KEY": "ENV_PRIVATE",
+            },
+        )
 
 
 def test_merge_redacted_config_preserves_replaces_and_omits_credentials() -> None:
