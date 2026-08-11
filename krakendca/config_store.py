@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -357,7 +358,7 @@ def _validate_amount(
     fields: dict[str, str],
 ) -> None:
     try:
-        amount = float(dca_pair.get("amount"))
+        amount = _finite_float(dca_pair.get("amount"))
     except (TypeError, ValueError):
         fields[f"dca_pairs.{index}.amount"] = (
             "Please provide an amount > 0 to DCA."
@@ -403,14 +404,17 @@ def _validate_limit_factor(
 ) -> None:
     if dca_pair.get("limit_factor"):
         try:
-            limit_factor = float(dca_pair.get("limit_factor"))
+            limit_factor = _finite_float(dca_pair.get("limit_factor"))
             if len(str(limit_factor).split(".")[1]) > 5:
                 raise ValueError
             normalized_pair["limit_factor"] = limit_factor
-        except (IndexError, TypeError, ValueError):
-            fields[f"dca_pairs.{index}.limit_factor"] = (
-                "limit_factor option must be a number up to 5 digits."
-            )
+        except (IndexError, TypeError, ValueError) as exc:
+            message = "limit_factor option must be a number up to 5 digits."
+            if str(exc) == "non-finite":
+                message = (
+                    "limit_factor option must be a finite number up to 5 digits."
+                )
+            fields[f"dca_pairs.{index}.limit_factor"] = message
 
 
 def _validate_max_price(
@@ -421,11 +425,14 @@ def _validate_max_price(
 ) -> None:
     if dca_pair.get("max_price"):
         try:
-            normalized_pair["max_price"] = float(dca_pair.get("max_price"))
-        except (TypeError, ValueError):
-            fields[f"dca_pairs.{index}.max_price"] = (
-                "max_price must be a number."
+            normalized_pair["max_price"] = _finite_float(
+                dca_pair.get("max_price")
             )
+        except (TypeError, ValueError) as exc:
+            message = "max_price must be a number."
+            if str(exc) == "non-finite":
+                message = "max_price must be a finite number."
+            fields[f"dca_pairs.{index}.max_price"] = message
 
 
 def _validate_ignore_differing_orders(
@@ -498,6 +505,13 @@ def _prune_backups(config_path: Path) -> None:
 def _raise_first(fields: dict[str, str]) -> None:
     message = next(iter(fields.values()))
     raise ConfigValidationError(message, fields)
+
+
+def _finite_float(value: object) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("non-finite")
+    return number
 
 
 def _env(env: dict | None) -> dict:

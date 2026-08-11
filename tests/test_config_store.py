@@ -84,6 +84,56 @@ def test_rejects_non_string_pair_without_type_error() -> None:
 
 
 @pytest.mark.parametrize(
+    "amount",
+    [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"],
+)
+def test_rejects_non_finite_amount(amount: object) -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["amount"] = amount
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config)
+
+    assert exc_info.value.fields == {
+        "dca_pairs.0.amount": "Please provide an amount > 0 to DCA."
+    }
+
+
+@pytest.mark.parametrize(
+    "max_price",
+    [float("nan"), float("inf"), "nan", "inf"],
+)
+def test_rejects_non_finite_max_price(max_price: object) -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["max_price"] = max_price
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config)
+
+    assert exc_info.value.fields == {
+        "dca_pairs.0.max_price": "max_price must be a finite number."
+    }
+
+
+@pytest.mark.parametrize(
+    "limit_factor",
+    [float("nan"), float("inf"), "nan", "inf"],
+)
+def test_rejects_non_finite_limit_factor(limit_factor: object) -> None:
+    config = valid_config()
+    config["dca_pairs"][0]["limit_factor"] = limit_factor
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        validate_config(config)
+
+    assert exc_info.value.fields == {
+        "dca_pairs.0.limit_factor": (
+            "limit_factor option must be a finite number up to 5 digits."
+        )
+    }
+
+
+@pytest.mark.parametrize(
     ("target", "value", "field"),
     [
         ("top-level", "/tmp/orders.csv", "orders_filepath"),
