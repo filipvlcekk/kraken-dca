@@ -68,6 +68,17 @@ class LoginThrottle:
         with self._lock:
             self._failures.pop(client_key, None)
 
+    def clear_failures(
+        self,
+        client_key: str,
+        *,
+        global_failures: bool = False,
+    ) -> None:
+        with self._lock:
+            self._failures.pop(client_key, None)
+            if global_failures:
+                self._global_failures.clear()
+
     def _prune(self, now: float) -> None:
         cutoff = now - self._window_seconds
         self._global_failures = [
@@ -143,12 +154,7 @@ def verify_password(submitted: str, expected: str) -> bool:
 
 def require_login_allowed(request: Request) -> None:
     throttle: LoginThrottle = request.app.state.login_throttle
-    if not throttle.is_allowed(_client_key(request)):
-        raise ApiException(
-            429,
-            "rate_limited",
-            "Too many login attempts. Try again later.",
-        )
+    _require_throttle_allowed(throttle, request)
 
 
 def record_login_failure(request: Request) -> None:
@@ -159,6 +165,37 @@ def record_login_failure(request: Request) -> None:
 def record_login_success(request: Request) -> None:
     throttle: LoginThrottle = request.app.state.login_throttle
     throttle.record_success(_client_key(request))
+
+
+def require_oidc_start_allowed(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.oidc_start_throttle
+    _require_throttle_allowed(throttle, request)
+
+
+def record_oidc_start(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.oidc_start_throttle
+    throttle.record_failure(_client_key(request))
+
+
+def require_oidc_attempt_allowed(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.oidc_throttle
+    _require_throttle_allowed(throttle, request)
+
+
+def record_oidc_failure(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.oidc_throttle
+    throttle.record_failure(_client_key(request))
+
+
+def record_oidc_success(request: Request) -> None:
+    client_key = _client_key(request)
+    cleared: set[int] = set()
+    for state_name in ("oidc_start_throttle", "oidc_throttle"):
+        throttle: LoginThrottle = getattr(request.app.state, state_name)
+        if id(throttle) in cleared:
+            continue
+        throttle.clear_failures(client_key, global_failures=True)
+        cleared.add(id(throttle))
 
 
 def encode_session(
@@ -247,6 +284,18 @@ def _client_key(request: Request) -> str:
     if request.client is None:
         return "unknown"
     return request.client.host or "unknown"
+
+
+def _require_throttle_allowed(
+    throttle: LoginThrottle,
+    request: Request,
+) -> None:
+    if not throttle.is_allowed(_client_key(request)):
+        raise ApiException(
+            429,
+            "rate_limited",
+            "Too many login attempts. Try again later.",
+        )
 
 
 def _session_matches_auth_mode(

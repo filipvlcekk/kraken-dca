@@ -55,6 +55,8 @@ def create_app(
         app.state.oidc_state_serializer = oidc.state_serializer(session_secret)
         app.state.cookie_secure = auth.cookie_secure()
         app.state.login_throttle = auth.LoginThrottle()
+        app.state.oidc_start_throttle = auth.LoginThrottle()
+        app.state.oidc_throttle = auth.LoginThrottle()
         app.state.scheduler = None
         app.state.config_response = _build_config_response(config_path)
         app.state.build_config_response = lambda: _build_config_response(

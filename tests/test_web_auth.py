@@ -243,6 +243,38 @@ def test_oidc_start_redirects_to_provider_and_sets_state_cookie(
     assert "Max-Age=600" in cookie
 
 
+def test_oidc_start_is_rate_limited(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        for _attempt in range(auth.LOGIN_MAX_FAILURES):
+            response = client.get(
+                "/api/auth/oidc/start",
+                follow_redirects=False,
+            )
+            assert response.status_code in {302, 307}
+
+        response = client.get(
+            "/api/auth/oidc/start",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "ok": False,
+        "error": {
+            "code": "rate_limited",
+            "message": "Too many login attempts. Try again later.",
+        },
+    }
+
+
 def test_oidc_callback_rejects_missing_state_cookie(
     tmp_path,
     monkeypatch,
@@ -261,6 +293,165 @@ def test_oidc_callback_rejects_missing_state_cookie(
     assert response.status_code == 307
     assert response.headers["location"] == "/login?error=oidc"
     assert auth.COOKIE_NAME not in response.headers.get("set-cookie", "")
+
+
+def test_oidc_callback_rate_limit_prevents_token_exchange(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake_client = FakeOidcClient()
+        client.app.state.oidc_client = fake_client
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        client.app.state.oidc_throttle = auth.LoginThrottle(max_failures=0)
+        response = client.get(
+            f"/api/auth/oidc/callback?code=code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "rate_limited"
+    assert fake_client.calls == []
+
+
+def test_oidc_callback_after_last_allowed_start_is_not_rate_limited(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake_client = FakeOidcClient()
+        client.app.state.oidc_client = fake_client
+        client.app.state.oidc_start_throttle = auth.LoginThrottle(
+            max_failures=auth.LOGIN_MAX_FAILURES,
+        )
+        for _attempt in range(auth.LOGIN_MAX_FAILURES):
+            start = client.get(
+                "/api/auth/oidc/start",
+                follow_redirects=False,
+            )
+            assert start.status_code in {302, 307}
+
+        query = parse_qs(urlparse(start.headers["location"]).query)
+        response = client.get(
+            (
+                "/api/auth/oidc/callback"
+                f"?code=code&state={query['state'][0]}"
+            ),
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/"
+    assert fake_client.calls == [
+        {"code": "code", "nonce": query["nonce"][0]},
+    ]
+
+
+def test_successful_oidc_login_clears_start_global_throttle(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake_client = FakeOidcClient()
+        client.app.state.oidc_client = fake_client
+        start_throttle = auth.LoginThrottle(
+            max_failures=100,
+            global_max_failures=1,
+        )
+        client.app.state.oidc_start_throttle = start_throttle
+        client.app.state.oidc_throttle = start_throttle
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        query = parse_qs(urlparse(start.headers["location"]).query)
+        client.app.state.oidc_throttle = auth.LoginThrottle(max_failures=100)
+        callback = client.get(
+            (
+                "/api/auth/oidc/callback"
+                f"?code=code&state={query['state'][0]}"
+            ),
+            follow_redirects=False,
+        )
+        client.app.state.oidc_throttle = start_throttle
+        next_start = client.get(
+            "/api/auth/oidc/start",
+            follow_redirects=False,
+        )
+
+    assert callback.status_code == 307
+    assert callback.headers["location"] == "/"
+    assert next_start.status_code in {302, 307}
+
+
+def test_oidc_callback_rejects_oversized_state_and_records_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        client.app.state.oidc_throttle = auth.LoginThrottle(max_failures=1)
+        response = client.get(
+            f"/api/auth/oidc/callback?code=code&state={'s' * 257}",
+            follow_redirects=False,
+        )
+        limited = client.get(
+            "/api/auth/oidc/callback?code=code&state=state",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
+
+
+def test_oidc_callback_rejects_oversized_code_before_token_exchange(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_oidc_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake_client = FakeOidcClient()
+        client.app.state.oidc_client = fake_client
+        start = client.get("/api/auth/oidc/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        client.app.state.oidc_throttle = auth.LoginThrottle(max_failures=1)
+        response = client.get(
+            f"/api/auth/oidc/callback?code={'c' * 4097}&state={state}",
+            follow_redirects=False,
+        )
+        limited = client.get(
+            f"/api/auth/oidc/callback?code=code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/login?error=oidc"
+    assert fake_client.calls == []
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
 
 
 def test_oidc_callback_rejects_tampered_state_cookie(

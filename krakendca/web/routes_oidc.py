@@ -12,11 +12,17 @@ from krakendca.web.schemas import ApiException
 
 router = APIRouter(prefix="/api/auth/oidc", tags=["oidc"])
 
+_OIDC_STATE_MAX_LENGTH = 256
+_OIDC_CODE_MAX_LENGTH = 4096
+
 
 @router.get("/start")
 async def start(request: Request):
     if request.app.state.auth_mode != "oidc":
         raise ApiException(404, "not_found", "OIDC login is not enabled.")
+
+    auth.require_oidc_start_allowed(request)
+    auth.record_oidc_start(request)
 
     state = oidc.new_state()
     nonce = oidc.new_state()
@@ -42,8 +48,10 @@ async def callback(request: Request):
     if request.app.state.auth_mode != "oidc":
         raise ApiException(404, "not_found", "OIDC login is not enabled.")
 
+    auth.require_oidc_attempt_allowed(request)
+
     submitted_state = request.query_params.get("state") or ""
-    if not submitted_state:
+    if not submitted_state or len(submitted_state) > _OIDC_STATE_MAX_LENGTH:
         return _failure_response(request, clear_state=False)
 
     pending = _pending_state(request)
@@ -54,7 +62,7 @@ async def callback(request: Request):
         return _failure_response(request)
 
     code = request.query_params.get("code") or ""
-    if not code:
+    if not code or len(code) > _OIDC_CODE_MAX_LENGTH:
         return _failure_response(request)
 
     try:
@@ -78,6 +86,7 @@ async def callback(request: Request):
         oidc.session_payload(identity),
     )
     _clear_state_cookie(request, response)
+    auth.record_oidc_success(request)
     return response
 
 
@@ -104,6 +113,7 @@ def _failure_response(
     request: Request,
     clear_state: bool = True,
 ) -> RedirectResponse:
+    auth.record_oidc_failure(request)
     response = RedirectResponse("/login?error=oidc")
     if clear_state:
         _clear_state_cookie(request, response)
