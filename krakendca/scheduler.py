@@ -261,7 +261,10 @@ class SchedulerService:
     def _run_pair_with_config(self, pair: str, config: dict) -> RunResult:
         public_key, private_key = self._effective_api_keys(config)
         kraken_api = self._kraken_api_factory(public_key, private_key)
-        return self._runner(config, pair, kraken_api)
+        try:
+            return self._runner(config, pair, kraken_api)
+        finally:
+            _close_if_supported(kraken_api)
 
     def _build_job_specs(self, config: dict) -> list[_JobSpec]:
         specs = []
@@ -386,6 +389,12 @@ def _failed_result(pair: str, reason: str, message: str) -> RunResult:
         order_txid=None,
         message=message,
     )
+
+
+def _close_if_supported(client: object) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
 
 
 def _utc_now_iso() -> str:

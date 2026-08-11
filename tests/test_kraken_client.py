@@ -6,6 +6,21 @@ import pytest
 from krakendca.kraken_client import KrakenClient
 
 
+def test_kraken_client_close_closes_httpx_client() -> None:
+    client = KrakenClient()
+
+    client.close()
+
+    assert client._client.is_closed
+
+
+def test_kraken_client_context_manager_closes_httpx_client() -> None:
+    with KrakenClient() as client:
+        assert not client._client.is_closed
+
+    assert client._client.is_closed
+
+
 def test_create_api_signature_matches_kraken_documentation_example() -> None:
     client = KrakenClient(
         "",

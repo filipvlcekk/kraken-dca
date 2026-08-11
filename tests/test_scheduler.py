@@ -980,6 +980,45 @@ def test_manual_run_returns_config_not_applied_when_fingerprints_differ(
     assert runner.calls == []
 
 
+def test_run_pair_now_closes_factory_client_after_runner_finishes(
+    tmp_path,
+) -> None:
+    class CloseableKrakenClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    kraken_api = CloseableKrakenClient()
+    runner_calls = []
+
+    def factory(public_key: str, private_key: str) -> CloseableKrakenClient:
+        return kraken_api
+
+    def runner(config: dict, pair: str, client: object) -> RunResult:
+        assert client is kraken_api
+        assert kraken_api.closed is False
+        runner_calls.append((config, pair, client))
+        return _ok_result(pair)
+
+    service = _started_service(
+        tmp_path,
+        _config([_pair()]),
+        runner=runner,
+        factory=factory,
+    )
+
+    try:
+        result = service.run_pair_now("XETHZEUR")
+    finally:
+        service.shutdown()
+
+    assert result.status == "success"
+    assert len(runner_calls) == 1
+    assert kraken_api.closed is True
+
+
 def test_run_pair_now_uses_config_snapshot_when_reload_happens_after_check(
     tmp_path,
     monkeypatch,

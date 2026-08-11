@@ -620,10 +620,21 @@ def test_asset_pair_search_returns_canonical_pair_suggestions(
     monkeypatch,
 ) -> None:
     client, _path, _csrf = authed_client(valid_config())
+    fake_instances = []
 
     class FakeKrakenClient:
         def __init__(self, *_args, **_kwargs) -> None:
-            pass
+            self.closed = False
+            fake_instances.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self.close()
+
+        def close(self) -> None:
+            self.closed = True
 
         def get_asset_pairs(self) -> dict:
             return {
@@ -660,6 +671,7 @@ def test_asset_pair_search_returns_canonical_pair_suggestions(
             ]
         },
     }
+    assert fake_instances[0].closed is True
 
 
 @pytest.mark.parametrize("config_text", ["[]", "foo"])

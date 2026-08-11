@@ -20,7 +20,8 @@ async def search_asset_pairs(
     """Return compact Kraken asset pair suggestions for a search query."""
     auth.require_authenticated_session(request)
     try:
-        asset_pairs = KrakenClient("", "").get_asset_pairs()
+        with KrakenClient("", "") as kraken:
+            asset_pairs = kraken.get_asset_pairs()
     except (ConnectionError, OSError, TimeoutError, ValueError) as exc:
         raise ApiException(
             502,

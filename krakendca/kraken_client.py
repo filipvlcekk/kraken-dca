@@ -43,6 +43,21 @@ class KrakenClient:
         self._nonce_lock = threading.Lock()
         self._last_nonce = 0
 
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._client.close()
+
+    def __enter__(self) -> "KrakenClient":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> None:
+        self.close()
+
     def create_api_signature(
         self,
         uri_path: str,
