@@ -68,66 +68,73 @@ function startOidcLogin(url: string | null): void {
 <style scoped>
 .login-view {
   width: min(100%, 620px);
-  padding: clamp(1.5rem, 4vw, 3rem);
-  border: 1px solid rgba(42, 50, 32, 0.14);
-  border-radius: 34px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(226, 167, 68, 0.28), transparent 34%),
-    linear-gradient(145deg, rgba(255, 252, 241, 0.94), rgba(236, 226, 201, 0.86));
-  box-shadow: 0 34px 100px rgba(37, 43, 28, 0.18);
+  margin-inline: auto;
+  padding: clamp(var(--space-lg), 4vw, var(--space-xl));
+  border: var(--rule-hairline);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(145deg, var(--color-paper-3), var(--color-paper-2));
 }
 
 .mark {
   display: inline-grid;
-  width: 4rem;
-  height: 4rem;
+  width: 3.5rem;
+  height: 3.5rem;
   place-items: center;
-  border-radius: 1.4rem;
-  background: #23311f;
-  color: #f8ead0;
-  font-weight: 900;
-  letter-spacing: -0.05em;
+  border: var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .eyebrow {
-  margin: 1.4rem 0 0.5rem;
-  color: var(--color-rust);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  margin: var(--space-lg) 0 var(--space-xs);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 h1 {
-  max-width: 10ch;
+  max-width: 16ch;
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(3rem, 11vw, 6.8rem);
-  line-height: 0.85;
-  letter-spacing: -0.08em;
+  font-size: var(--text-display);
+  line-height: 1.05;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .lede {
   max-width: 34rem;
-  margin: 1.25rem 0 0;
-  color: var(--color-muted);
-  font-size: 1.05rem;
+  margin: var(--space-md) 0 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-base);
 }
 
 .login-form {
   display: grid;
-  gap: 0.9rem;
-  margin-top: 2rem;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
 }
 
 label {
   display: grid;
-  gap: 0.4rem;
+  gap: var(--space-xs);
+  color: var(--color-ink-2);
   font-weight: 800;
 }
 
 .error {
-  margin: 1rem 0 0;
+  margin: var(--space-md) 0 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
   color: var(--color-danger);
   font-weight: 800;
 }

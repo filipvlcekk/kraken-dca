@@ -18,6 +18,7 @@ from krakendca.web import oidc
 from krakendca.web.config_loading import load_config_preserving_root
 from krakendca.web.routes_asset_pairs import router as asset_pairs_router
 from krakendca.web.routes_config import router as config_router
+from krakendca.web.routes_history import router as history_router
 from krakendca.web.routes_oidc import router as oidc_router
 from krakendca.web.routes_scheduler import router as scheduler_router
 from krakendca.web.routes_session import router as session_router
@@ -93,6 +94,7 @@ def create_app(
     app.include_router(asset_pairs_router)
     app.include_router(config_router)
     app.include_router(scheduler_router)
+    app.include_router(history_router)
 
     @app.middleware("http")
     async def refresh_authenticated_session(request: Request, call_next):

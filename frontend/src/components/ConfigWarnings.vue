@@ -55,15 +55,15 @@ defineProps<{
 <style scoped>
 .warnings {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-sm);
 }
 
 .warning {
-  padding: 1rem;
-  border: 1px solid rgba(160, 74, 38, 0.24);
-  border-radius: 18px;
-  background: rgba(255, 237, 207, 0.8);
-  color: #532f15;
+  padding: var(--space-md);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-ink);
 }
 
 .warning h2,
@@ -71,8 +71,18 @@ defineProps<{
   margin: 0;
 }
 
+.warning h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+}
+
+.warning p,
+.warning li {
+  color: var(--color-ink-2);
+}
+
 .warning ul {
-  margin: 0.5rem 0 0;
-  padding-left: 1.25rem;
+  margin: var(--space-xs) 0 0;
+  padding-left: var(--space-lg);
 }
 </style>

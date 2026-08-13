@@ -150,16 +150,16 @@ function savePrivateReplacement(): void {
 <style scoped>
 .credentials {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-md);
 }
 
 .credential {
   display: grid;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid rgba(42, 50, 32, 0.16);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.5);
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-3);
 }
 
 .credential h2,
@@ -167,8 +167,24 @@ function savePrivateReplacement(): void {
   margin: 0;
 }
 
+.credential h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+}
+
+.credential p {
+  color: var(--color-muted);
+}
+
 .replacement {
-  display: flex;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-xs);
+}
+
+@media (max-width: 42rem) {
+  .replacement {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

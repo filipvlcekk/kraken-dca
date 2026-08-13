@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import csv
 
 import pytest
 import yaml
@@ -957,6 +958,165 @@ def test_manual_run_maps_kraken_error_to_502(authed_client) -> None:
     assert response.json()["error"]["code"] == "kraken_error"
 
 
+def test_history_requires_authentication(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
+    app = create_app(
+        config_path=write_config(tmp_path, valid_config()),
+        static_dir=str(tmp_path / "frontend"),
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get("/api/history")
+
+    assert response.status_code == 401
+    assert response.json()["ok"] is False
+
+
+def test_history_returns_empty_state_for_missing_orders_file(
+    authed_client,
+) -> None:
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    client, _path, _csrf = authed_client(config)
+
+    response = client.get("/api/history")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"] == []
+    assert data["pairs"] == []
+    assert data["portfolio"]["trade_count"] == 0
+    assert data["portfolio"]["total_spent"] == "0"
+    assert data["chart"] == []
+    assert data["valuation"]["status"] == "not_available"
+
+
+def test_history_returns_completed_order_summary(
+    authed_client,
+    monkeypatch,
+) -> None:
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    client, path, _csrf = authed_client(config)
+    _write_order_rows(
+        path,
+        [
+            _history_row(
+                date="2026-07-20 10:00:00",
+                volume="0.01",
+                price="20",
+                fee="0.05",
+                total_price="20.05",
+                txid="ETH1",
+            ),
+            _history_row(
+                date="2026-07-21 10:00:00",
+                volume="0.02",
+                price="40",
+                fee="0.10",
+                total_price="40.10",
+                txid="ETH2",
+            ),
+        ],
+    )
+
+    class FakeKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def get_pair_ticker(self, pair: str) -> dict:
+            assert pair == "XETHZEUR"
+            return {"XETHZEUR": {"c": ["2500.0", "0.01"]}}
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.get("/api/history")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [entry["txid"] for entry in data["entries"]] == ["ETH2", "ETH1"]
+    assert data["pairs"][0]["pair"] == "XETHZEUR"
+    assert data["pairs"][0]["trade_count"] == 2
+    assert data["pairs"][0]["total_volume"] == "0.03"
+    assert data["pairs"][0]["total_spent"] == "60.15"
+    assert data["pairs"][0]["estimated_value"] == "75.000"
+    assert data["pairs"][0]["estimated_pl"] == "14.850"
+    assert data["portfolio"]["estimated_pl"] == "14.850"
+    assert data["chart"][-1]["cumulative_spent"] == "60.15"
+    assert data["valuation"]["status"] == "live"
+
+
+def test_history_keeps_csv_data_when_live_prices_fail(
+    authed_client,
+    monkeypatch,
+) -> None:
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    client, path, _csrf = authed_client(config)
+    _write_order_rows(path, [_history_row()])
+
+    class FailingKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def get_pair_ticker(self, _pair: str) -> dict:
+            raise ConnectionError("network down")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FailingKrakenClient,
+    )
+
+    response = client.get("/api/history")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["entries"][0]["txid"] == "TXID"
+    assert data["pairs"][0]["estimated_pl"] is None
+    assert data["valuation"]["status"] == "unavailable"
+    assert data["valuation"]["message"] == "Live Kraken price unavailable."
+
+
+def test_history_uses_pair_level_orders_filepath(
+    authed_client,
+    monkeypatch,
+) -> None:
+    config = valid_config()
+    config["orders_filepath"] = "unused-default.csv"
+    config["dca_pairs"][0]["orders_filepath"] = "pair-orders.csv"
+    client, path, _csrf = authed_client(config)
+    from pathlib import Path
+
+    _write_order_rows_to_path(
+        Path(path).parent / "pair-orders.csv",
+        [_history_row(txid="PAIR-FILE")],
+    )
+
+    class FakeKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def get_pair_ticker(self, _pair: str) -> dict:
+            return {"XETHZEUR": {"c": ["2500.0", "0.01"]}}
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.get("/api/history")
+
+    assert response.status_code == 200
+    assert [entry["txid"] for entry in response.json()["data"]["entries"]] == [
+        "PAIR-FILE"
+    ]
+
+
 def _scheduler_contract_keys() -> set[str]:
     return {
         "running",
@@ -966,4 +1126,47 @@ def _scheduler_contract_keys() -> set[str]:
         "reload_error",
         "last_reload_at",
         "jobs",
+    }
+
+
+def _write_order_rows(config_path: str, rows: list[dict[str, str]]) -> None:
+    _write_order_rows_to_path(tmp_orders_path(config_path), rows)
+
+
+def _write_order_rows_to_path(path, rows: list[dict[str, str]]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def tmp_orders_path(config_path: str):
+    from pathlib import Path
+
+    return Path(config_path).parent / "orders.csv"
+
+
+def _history_row(
+    *,
+    date: str = "2026-07-20 10:00:00",
+    pair: str = "XETHZEUR",
+    volume: str = "0.01",
+    price: str = "20",
+    fee: str = "0.05",
+    total_price: str = "20.05",
+    txid: str = "TXID",
+) -> dict[str, str]:
+    return {
+        "date": date,
+        "pair": pair,
+        "type": "buy",
+        "order_type": "limit",
+        "o_flags": "fciq",
+        "pair_price": "2000",
+        "volume": volume,
+        "price": price,
+        "fee": fee,
+        "total_price": total_price,
+        "txid": txid,
+        "description": f"buy {volume} {pair} @ limit 2000",
     }

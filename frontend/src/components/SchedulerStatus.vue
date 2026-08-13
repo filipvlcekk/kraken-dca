@@ -54,27 +54,26 @@ function jobCountLabel(count: number): string {
 <style scoped>
 .scheduler-status {
   display: grid;
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid rgba(44, 58, 40, 0.14);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(236, 190, 91, 0.18), transparent 32%),
-    rgba(250, 247, 237, 0.82);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-2);
 }
 
 .status-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-md);
 }
 
 .eyebrow {
-  margin: 0 0 0.25rem;
-  color: #69705a;
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
+  margin: 0 0 var(--space-2xs);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -84,18 +83,30 @@ function jobCountLabel(count: number): string {
   margin: 0;
 }
 
+.status-header h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+}
+
+.status-header p,
+.job p,
+.job span {
+  color: var(--color-muted);
+}
+
 .alert {
   display: grid;
-  gap: 0.25rem;
-  padding: 0.75rem;
-  border-radius: 16px;
-  background: rgba(199, 92, 42, 0.12);
-  color: #5b311d;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  color: var(--color-ink);
 }
 
 .jobs {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-sm);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -103,15 +114,23 @@ function jobCountLabel(count: number): string {
 
 .job {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.85rem;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.58);
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-3);
 }
 
 .job div {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-md);
+}
+
+@media (max-width: 48rem) {
+  .status-header,
+  .job div {
+    display: grid;
+  }
 }
 </style>

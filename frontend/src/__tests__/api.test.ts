@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   REDACTED_SECRET,
   loadConfig,
+  loadHistory,
   loadSchedulerStatus,
   login,
   logout,
@@ -31,6 +32,7 @@ describe('API client', () => {
     expect(login).toBeTypeOf('function')
     expect(logout).toBeTypeOf('function')
     expect(loadConfig).toBeTypeOf('function')
+    expect(loadHistory).toBeTypeOf('function')
     expect(saveConfig).toBeTypeOf('function')
     expect(loadSchedulerStatus).toBeTypeOf('function')
     expect(reloadScheduler).toBeTypeOf('function')
@@ -83,17 +85,19 @@ describe('API client', () => {
     )
   })
 
-  it('loads config, scheduler status, and manual run endpoints', async () => {
+  it('loads config, scheduler status, history, and manual run endpoints', async () => {
     fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ ok: true, data: {} })))
 
     await loadConfig()
     await loadSchedulerStatus()
+    await loadHistory()
     await runPairNow('XXBT/ZEUR', 'csrf-token')
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/config', expect.objectContaining({ method: 'GET' }))
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/scheduler', expect.objectContaining({ method: 'GET' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/history', expect.objectContaining({ method: 'GET' }))
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       '/api/pairs/XXBT%2FZEUR/run',
       expect.objectContaining({
         method: 'POST',
