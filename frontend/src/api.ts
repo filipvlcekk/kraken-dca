@@ -87,6 +87,68 @@ export type SchedulerStatus = {
   jobs: SchedulerJob[]
 }
 
+export type HistoryEntry = {
+  date: string
+  pair: string
+  type: string
+  order_type: string
+  o_flags: string
+  pair_price: string
+  volume: string
+  price: string
+  fee: string
+  total_price: string
+  txid: string
+  description: string
+}
+
+export type PairHistorySummary = {
+  pair: string
+  trade_count: number
+  total_volume: string
+  total_spent: string
+  total_price: string
+  total_fees: string
+  average_buy_price: string | null
+  last_trade_at: string | null
+  last_trade_txid: string | null
+  current_price: string | null
+  estimated_value: string | null
+  estimated_pl: string | null
+}
+
+export type PortfolioHistorySummary = {
+  trade_count: number
+  total_spent: string
+  total_price: string
+  total_fees: string
+  estimated_value: string | null
+  estimated_pl: string | null
+}
+
+export type HistoryChartPoint = {
+  date: string
+  pair: string
+  txid: string
+  spent: string
+  volume: string
+  cumulative_spent: string
+  cumulative_volume: string
+}
+
+export type HistoryValuationStatus = {
+  status: 'live' | 'unavailable' | 'not_available'
+  message: string | null
+}
+
+export type HistoryResponse = {
+  entries: HistoryEntry[]
+  pairs: PairHistorySummary[]
+  portfolio: PortfolioHistorySummary
+  chart: HistoryChartPoint[]
+  valuation: HistoryValuationStatus
+}
+
 export type RunResult = {
   pair: string
   status: 'completed' | 'skipped' | 'failed' | 'success'
@@ -128,6 +190,10 @@ export function logout(csrfToken: string): Promise<ApiResponse<SessionResponse>>
 
 export function loadConfig(): Promise<ApiResponse<ConfigResponse>> {
   return request('/api/config')
+}
+
+export function loadHistory(): Promise<ApiResponse<HistoryResponse>> {
+  return request('/api/history')
 }
 
 export function saveConfig(

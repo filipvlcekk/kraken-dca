@@ -187,41 +187,69 @@ function onMinIntervalInput(event: Event): void {
 <style scoped>
 .schedule-editor {
   display: grid;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid rgba(56, 70, 48, 0.12);
-  border-radius: 20px;
-  background: rgba(248, 246, 237, 0.7);
+  gap: var(--space-sm);
+  padding-block-start: var(--space-md);
+  border-block-start: var(--rule-hairline);
 }
 
 .schedule-editor label {
   display: grid;
-  gap: 0.3rem;
-  color: #34402f;
-  font-size: 0.92rem;
+  gap: var(--space-2xs);
+  color: var(--color-ink-2);
+  font-size: var(--text-base);
+  font-weight: 700;
 }
 
 .toggle {
   display: flex;
   align-items: center;
   grid-template-columns: auto 1fr;
+  gap: var(--space-xs);
+}
+
+.toggle input {
+  width: auto;
+  min-height: auto;
+  accent-color: var(--color-accent);
 }
 
 .summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--space-xs);
   align-items: center;
+  padding: var(--space-sm);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+}
+
+.summary span {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .next-runs,
 .errors {
   margin: 0;
-  padding-left: 1.2rem;
+  padding-left: var(--space-lg);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .warning,
 .errors {
-  color: #7c391c;
+  color: var(--color-warning);
+}
+
+.warning {
+  margin: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
 }
 </style>

@@ -277,13 +277,11 @@ function updateMinInterval(value: number): void {
 <style scoped>
 .pair-editor {
   display: grid;
-  gap: 1rem;
-  padding: 1.1rem;
-  border: 1px solid rgba(34, 50, 35, 0.13);
-  border-radius: 26px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.76), rgba(239, 233, 213, 0.7)),
-    radial-gradient(circle at bottom left, rgba(83, 118, 73, 0.15), transparent 36%);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--color-paper-3);
 }
 
 header,
@@ -291,7 +289,7 @@ header,
 .manual-run {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-sm);
 }
 
 header {
@@ -299,26 +297,33 @@ header {
 }
 
 .eyebrow {
-  margin: 0 0 0.2rem;
-  color: #69705a;
-  font-size: 0.75rem;
-  letter-spacing: 0.14em;
+  margin: 0 0 var(--space-2xs);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 h2 {
   margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--space-sm);
 }
 
 label {
   display: grid;
-  gap: 0.3rem;
+  gap: var(--space-2xs);
+  color: var(--color-ink-2);
+  font-weight: 700;
 }
 
 .pair-combobox {
@@ -335,66 +340,90 @@ label {
 
 .pair-suggestions {
   position: absolute;
-  z-index: 10;
-  top: calc(100% + 0.25rem);
+  z-index: var(--z-dropdown);
+  top: calc(100% + var(--space-2xs));
   left: 0;
   right: 0;
   display: grid;
   max-height: 14rem;
   margin: 0;
-  padding: 0.25rem;
+  padding: var(--space-2xs);
   overflow-y: auto;
   list-style: none;
-  border: 1px solid rgba(34, 50, 35, 0.16);
-  border-radius: 8px;
-  background: #fffdf5;
-  box-shadow: 0 12px 24px rgba(34, 50, 35, 0.14);
+  border: var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
 }
 
 .pair-suggestions button {
   display: grid;
   width: 100%;
-  gap: 0.12rem;
-  padding: 0.55rem 0.6rem;
+  gap: var(--space-3xs);
+  padding: var(--space-xs) var(--space-sm);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: inherit;
+  color: var(--color-ink);
   text-align: left;
   cursor: pointer;
 }
 
 .pair-suggestions button:hover,
 .pair-suggestions button:focus-visible {
-  background: rgba(68, 101, 58, 0.12);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
   outline: none;
 }
 
 .pair-suggestions small,
 .pair-suggestion-status {
-  color: #69705a;
-  font-size: 0.8rem;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
 }
 
 .pair-suggestion-status {
-  padding: 0.55rem 0.6rem;
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .checkbox {
   display: flex;
   align-items: center;
+  gap: var(--space-xs);
+}
+
+.checkbox input {
+  width: auto;
+  min-height: auto;
+  accent-color: var(--color-accent);
 }
 
 .errors {
   margin: 0;
-  padding-left: 1.2rem;
-  color: #7c391c;
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .manual-run {
   justify-content: flex-start;
-  padding: 0.75rem;
-  border-radius: 16px;
-  background: rgba(68, 101, 58, 0.1);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  color: var(--color-ink);
+}
+
+.manual-run span {
+  color: var(--color-ink-2);
+}
+
+@media (max-width: 42rem) {
+  header,
+  .actions,
+  .manual-run {
+    display: grid;
+  }
 }
 </style>

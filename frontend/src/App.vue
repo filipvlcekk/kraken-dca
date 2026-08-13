@@ -6,14 +6,20 @@ import type { DcaPairConfig } from './api'
 import ConfigWarnings from './components/ConfigWarnings.vue'
 import CredentialEditor from './components/CredentialEditor.vue'
 import LoginView from './components/LoginView.vue'
+import OrderHistoryTable from './components/OrderHistoryTable.vue'
 import PairEditor from './components/PairEditor.vue'
+import PairStatusPanel from './components/PairStatusPanel.vue'
+import PortfolioSnapshot from './components/PortfolioSnapshot.vue'
+import ProfitLossChart from './components/ProfitLossChart.vue'
 import SchedulerStatus from './components/SchedulerStatus.vue'
 import { createConfigStore } from './configStore'
+import { createHistoryStore } from './historyStore'
 import { createSchedulerStore } from './schedulerStore'
 
 const auth = createAuthStore()
 const config = createConfigStore()
 const scheduler = createSchedulerStore()
+const history = createHistoryStore()
 const pairs = computed(() => config.state.config.dca_pairs ?? [])
 
 onMounted(async () => {
@@ -27,6 +33,7 @@ async function loadDashboard(): Promise<void> {
   await Promise.all([
     config.load(),
     scheduler.loadStatus(),
+    history.load(),
   ])
 }
 
@@ -52,18 +59,23 @@ async function saveConfig(): Promise<void> {
   const saved = await config.save(auth.state.csrfToken)
   if (saved) {
     await scheduler.reload(auth.state.csrfToken)
+    await history.load()
   }
 }
 
 async function reloadScheduler(): Promise<void> {
   if (auth.state.csrfToken !== null) {
     await scheduler.reload(auth.state.csrfToken)
+    await history.load()
   }
 }
 
 async function runPairNow(pair: string): Promise<void> {
   if (auth.state.csrfToken !== null && pair) {
-    await scheduler.runPairNow(pair, auth.state.csrfToken)
+    const ran = await scheduler.runPairNow(pair, auth.state.csrfToken)
+    if (ran) {
+      await history.load()
+    }
   }
 }
 
@@ -118,6 +130,28 @@ function pairFieldErrors(index: number): Record<string, string> {
         :setup-mode="config.state.setupMode"
       />
 
+      <div v-if="history.state.history" class="history-overview">
+        <PortfolioSnapshot
+          :portfolio="history.state.history.portfolio"
+          :valuation="history.state.history.valuation"
+        />
+        <PairStatusPanel
+          :pairs="history.state.history.pairs"
+          :jobs="scheduler.state.status?.jobs ?? []"
+        />
+        <ProfitLossChart
+          :points="history.state.history.chart"
+          :estimated-value="history.state.history.portfolio.estimated_value"
+        />
+      </div>
+
+      <p v-else-if="history.state.loading" class="loading">
+        Loading completed orders...
+      </p>
+      <p v-else-if="history.state.error" class="history-error">
+        {{ history.state.error }}
+      </p>
+
       <div class="dashboard-grid">
         <section class="panel credentials-panel">
           <div class="panel-heading">
@@ -163,6 +197,11 @@ function pairFieldErrors(index: number): Record<string, string> {
         </div>
       </section>
 
+      <OrderHistoryTable
+        v-if="history.state.history"
+        :entries="history.state.history.entries"
+      />
+
       <footer class="save-bar">
         <div>
           <strong>{{ config.state.dirty ? 'Unsaved changes' : 'Config synchronized' }}</strong>
@@ -179,82 +218,102 @@ function pairFieldErrors(index: number): Record<string, string> {
 <style scoped>
 .app-shell {
   width: min(100%, 1180px);
+  margin-inline: auto;
 }
 
 .loading {
-  padding: 1rem 1.2rem;
-  border-radius: 999px;
-  background: rgba(255, 252, 241, 0.88);
-  box-shadow: 0 18px 60px rgba(37, 43, 28, 0.14);
+  width: fit-content;
+  padding: var(--space-sm) var(--space-md);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
 }
 
 .dashboard {
   display: grid;
-  gap: clamp(1rem, 2vw, 1.5rem);
+  gap: clamp(var(--space-md), 2vw, var(--space-lg));
 }
 
 .hero,
-.panel,
-.pairs-section,
 .save-bar {
-  border: 1px solid rgba(42, 50, 32, 0.14);
-  box-shadow: 0 26px 80px rgba(37, 43, 28, 0.12);
+  border: var(--rule-hairline);
 }
 
 .hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: clamp(1.3rem, 4vw, 2.4rem);
-  border-radius: 34px;
-  background:
-    radial-gradient(circle at 82% 8%, rgba(226, 167, 68, 0.32), transparent 32%),
-    linear-gradient(140deg, rgba(255, 252, 241, 0.96), rgba(229, 219, 193, 0.84));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-lg);
+  padding: clamp(var(--space-lg), 4vw, var(--space-xl));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--color-paper-3), var(--color-paper-2));
 }
 
 .hero h1 {
-  max-width: 11ch;
+  max-width: 18ch;
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(3rem, 8vw, 6.6rem);
-  line-height: 0.86;
-  letter-spacing: -0.08em;
+  font-size: var(--text-display);
+  line-height: 1.05;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .hero p:not(.eyebrow) {
   max-width: 42rem;
-  margin: 1rem 0 0;
-  color: var(--color-muted);
-  font-size: 1.08rem;
+  margin: var(--space-sm) 0 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-base);
 }
 
 .eyebrow {
-  margin: 0 0 0.35rem;
-  color: var(--color-rust);
-  font-size: 0.75rem;
-  font-weight: 900;
-  letter-spacing: 0.16em;
+  margin: 0 0 var(--space-xs);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 1rem;
+  gap: var(--space-md);
+}
+
+.history-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: var(--space-md);
+}
+
+.history-overview > :first-child {
+  grid-column: 1 / -1;
+}
+
+.history-error {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: var(--rule-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .panel,
 .pairs-section {
-  padding: 1rem;
-  border-radius: 28px;
-  background: rgba(255, 252, 241, 0.78);
+  min-width: 0;
 }
 
 .panel-heading h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(1.8rem, 3vw, 3rem);
-  letter-spacing: -0.05em;
+  font-size: clamp(var(--text-lg), 2vw, var(--text-xl));
+  line-height: 1.15;
+  letter-spacing: 0;
 }
 
 .row,
@@ -267,34 +326,41 @@ function pairFieldErrors(index: number): Record<string, string> {
 
 .pairs-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-md);
+  margin-top: var(--space-md);
 }
 
 .save-bar {
+  z-index: var(--z-sticky);
   position: sticky;
-  bottom: 1rem;
-  padding: 1rem;
-  border-radius: 24px;
-  background: rgba(35, 49, 31, 0.94);
-  color: #f8ead0;
+  bottom: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-4);
+  color: var(--color-ink);
 }
 
 .save-bar p {
-  margin: 0.25rem 0 0;
-  color: rgba(248, 234, 208, 0.76);
+  margin: var(--space-2xs) 0 0;
+  color: var(--color-muted);
 }
 
 @media (max-width: 820px) {
   .hero,
   .dashboard-grid,
+  .history-overview,
   .row,
   .save-bar {
     display: grid;
   }
 
-  .dashboard-grid {
+  .dashboard-grid,
+  .history-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
     grid-template-columns: 1fr;
   }
 }

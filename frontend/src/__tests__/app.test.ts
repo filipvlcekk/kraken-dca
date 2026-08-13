@@ -9,6 +9,24 @@ const emptySecrets = {
   private_key: { configured: false, source: null },
 } as const
 
+const emptyHistory = {
+  entries: [],
+  pairs: [],
+  portfolio: {
+    trade_count: 0,
+    total_spent: '0',
+    total_price: '0',
+    total_fees: '0',
+    estimated_value: null,
+    estimated_pl: null,
+  },
+  chart: [],
+  valuation: {
+    status: 'not_available',
+    message: null,
+  },
+}
+
 describe('auth store', () => {
   const fetchMock = vi.fn()
 
@@ -161,6 +179,68 @@ describe('App shell', () => {
           },
         }))
       }
+      if (path === '/api/history') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            entries: [
+              {
+                date: '2026-07-21T10:00:00',
+                pair: 'XXBTZEUR',
+                type: 'buy',
+                order_type: 'limit',
+                o_flags: 'fciq',
+                pair_price: '2500',
+                volume: '0.02',
+                price: '50',
+                fee: '0.10',
+                total_price: '50.10',
+                txid: 'TXID',
+                description: 'buy 0.02 XXBTZEUR @ limit 2500',
+              },
+            ],
+            pairs: [
+              {
+                pair: 'XXBTZEUR',
+                trade_count: 1,
+                total_volume: '0.02',
+                total_spent: '50.10',
+                total_price: '50',
+                total_fees: '0.10',
+                average_buy_price: '2500',
+                last_trade_at: '2026-07-21T10:00:00',
+                last_trade_txid: 'TXID',
+                current_price: '3000',
+                estimated_value: '60',
+                estimated_pl: '9.90',
+              },
+            ],
+            portfolio: {
+              trade_count: 1,
+              total_spent: '50.10',
+              total_price: '50',
+              total_fees: '0.10',
+              estimated_value: '60',
+              estimated_pl: '9.90',
+            },
+            chart: [
+              {
+                date: '2026-07-21T10:00:00',
+                pair: 'XXBTZEUR',
+                txid: 'TXID',
+                spent: '50.10',
+                volume: '0.02',
+                cumulative_spent: '50.10',
+                cumulative_volume: '0.02',
+              },
+            ],
+            valuation: {
+              status: 'live',
+              message: null,
+            },
+          },
+        }))
+      }
       return Promise.resolve(jsonResponse({ ok: true, data: {} }))
     })
 
@@ -170,6 +250,8 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Authenticated dashboard')
     expect(wrapper.text()).toContain('XXBTZEUR')
     expect(wrapper.text()).toContain('Scheduler running')
+    expect(wrapper.text()).toContain('You spent')
+    expect(wrapper.text()).toContain('Completed order history')
     expect(wrapper.text()).toContain('Add pair')
     expect(wrapper.text()).toContain('Save config')
   })
@@ -230,6 +312,9 @@ describe('App shell', () => {
           data: { pairs: [] },
         }))
       }
+      if (path === '/api/history') {
+        return Promise.resolve(jsonResponse({ ok: true, data: emptyHistory }))
+      }
       return Promise.resolve(jsonResponse({ ok: true, data: {} }))
     })
 
@@ -285,6 +370,9 @@ describe('App shell', () => {
             jobs: [],
           },
         }))
+      }
+      if (path === '/api/history') {
+        return Promise.resolve(jsonResponse({ ok: true, data: emptyHistory }))
       }
       return Promise.resolve(jsonResponse({ ok: true, data: {} }))
     })

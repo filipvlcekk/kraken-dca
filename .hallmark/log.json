@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2026-08-13",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "dark / mono / cool",
+    "vibe": "industrial precision, cool, technical",
+    "enrichment": "none",
+    "brief": "Kraken DCA scheduler dark operations UI"
+  },
+  {
+    "date": "2026-08-13",
+    "macrostructure": "Stat-Led",
+    "theme": "custom",
+    "theme_axes": "dark / mono / cool",
+    "vibe": "plain-language household finance, technical, restrained",
+    "enrichment": "data visualization",
+    "brief": "DCA pair status, completed order history, and estimated P/L dashboard"
+  }
+]
