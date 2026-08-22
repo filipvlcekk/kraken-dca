@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import json
 import math
@@ -191,7 +192,12 @@ def save_config(path: str, submitted: dict, env: dict | None = None) -> dict:
             shutil.copy2(config_path, backup_path)
             _prune_backups(config_path)
 
-        os.replace(temp_path, config_path)
+        try:
+            os.replace(temp_path, config_path)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            shutil.copyfile(temp_path, config_path)
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)

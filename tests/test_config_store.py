@@ -1,5 +1,6 @@
 """Shared config store tests."""
 
+import errno
 from datetime import datetime, timezone
 
 import pytest
@@ -319,6 +320,28 @@ def test_replaces_redacted_credentials_when_new_strings_are_submitted(
 
     assert saved["api"]["public_key"] == "NEW_PUBLIC_KEY"
     assert saved["api"]["private_key"] == "NEW_PRIVATE_KEY"
+
+
+def test_save_config_falls_back_for_bind_mounted_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import krakendca.config_store as config_store
+
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(valid_config()), encoding="utf-8")
+    submitted = valid_config()
+    submitted["dca_pairs"][0]["amount"] = 25
+
+    def busy_replace(_source: str, _target: str) -> None:
+        raise OSError(errno.EBUSY, "Device or resource busy")
+
+    monkeypatch.setattr(config_store.os, "replace", busy_replace)
+
+    save_config(str(path), submitted)
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert saved["dca_pairs"][0]["amount"] == 25.0
 
 
 def test_partial_submission_preserves_omitted_existing_file_credentials() -> None:
