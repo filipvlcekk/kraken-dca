@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Mapping
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -262,9 +264,26 @@ class SchedulerService:
         public_key, private_key = self._effective_api_keys(config)
         kraken_api = self._kraken_api_factory(public_key, private_key)
         try:
-            return self._runner(config, pair, kraken_api)
+            return self._runner(
+                self._config_with_resolved_history_paths(config),
+                pair,
+                kraken_api,
+            )
         finally:
             _close_if_supported(kraken_api)
+
+    def _config_with_resolved_history_paths(self, config: dict) -> dict:
+        resolved = deepcopy(config)
+        config_dir = Path(self.config_path).expanduser().resolve().parent
+        default_filename = resolved.get("orders_filepath", "orders.csv")
+        resolved["orders_filepath"] = str(config_dir / default_filename)
+
+        for dca_pair in resolved.get("dca_pairs") or []:
+            if "orders_filepath" in dca_pair:
+                dca_pair["orders_filepath"] = str(
+                    config_dir / dca_pair["orders_filepath"]
+                )
+        return resolved
 
     def _build_job_specs(self, config: dict) -> list[_JobSpec]:
         specs = []

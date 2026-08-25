@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 import yaml
@@ -405,6 +406,39 @@ def test_start_assigns_active_state_before_starting_scheduler(
         assert observed["reload_error"] is None
     finally:
         service.shutdown()
+
+
+def test_manual_run_resolves_history_file_relative_to_config_path(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    run_cwd = tmp_path / "run-cwd"
+    run_cwd.mkdir()
+    monkeypatch.chdir(run_cwd)
+    config = _config([_pair("XETHZEUR", delay=1)])
+
+    def writing_runner(config: dict, pair: str, _kraken_api: object) -> RunResult:
+        pair_config = next(
+            dca_pair
+            for dca_pair in config["dca_pairs"]
+            if dca_pair["pair"] == pair
+        )
+        orders_filepath = pair_config.get(
+            "orders_filepath",
+            config.get("orders_filepath", "orders.csv"),
+        )
+        Path(orders_filepath).write_text("written", encoding="utf-8")
+        return _ok_result(pair)
+
+    service = _started_service(tmp_path, config, runner=writing_runner)
+    try:
+        result = service.run_pair_now("XETHZEUR")
+    finally:
+        service.shutdown()
+
+    assert result.status == "success"
+    assert (tmp_path / "orders.csv").read_text(encoding="utf-8") == "written"
+    assert not (run_cwd / "orders.csv").exists()
 
 
 def test_shutdown_waits_for_running_jobs(tmp_path, monkeypatch) -> None:
