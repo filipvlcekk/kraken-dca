@@ -942,6 +942,347 @@ def test_history_requires_authentication(tmp_path, monkeypatch) -> None:
     assert response.json()["ok"] is False
 
 
+def test_history_import_preview_requires_authentication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WEB_UI_AUTH_MODE", "password")
+    monkeypatch.setenv("WEB_UI_PASSWORD", "secret")
+    monkeypatch.setenv("WEB_UI_SESSION_SECRET", TEST_SESSION_SECRET)
+    app = create_app(
+        config_path=write_config(tmp_path, valid_config()),
+        static_dir=str(tmp_path / "frontend"),
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.post(
+            "/api/history/import/preview",
+            json={"txids": ["OCYS4K-OILOE-36HPAE"]},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthenticated"
+
+
+def test_history_import_requires_csrf(authed_client) -> None:
+    client, _path, _csrf = authed_client(valid_config())
+
+    response = client.post(
+        "/api/history/import",
+        json={
+            "txids": ["OCYS4K-OILOE-36HPAE"],
+            "selected_txids": ["OCYS4K-OILOE-36HPAE"],
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "csrf_invalid"
+
+
+def test_history_import_preview_classifies_orders(
+    authed_client,
+    monkeypatch,
+) -> None:
+    ready_txid = "OCYS4K-OILOE-36HPAE"
+    already_txid = "O4OHPN-MU47M-3FUXEV"
+    unsupported_txid = "OMHP5J-W3RDC-C7LHOO"
+    not_found_txid = "OABC12-DEFGH-IJKLMN"
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    client, path, csrf = authed_client(config)
+    _write_order_rows(path, [_history_row(txid=already_txid)])
+    captured_keys = []
+
+    class FakeKrakenClient:
+        def __init__(self, public_key: str, private_key: str) -> None:
+            captured_keys.append((public_key, private_key))
+
+        def query_orders(self, txids: list[str]) -> dict:
+            assert txids == [
+                ready_txid,
+                already_txid,
+                unsupported_txid,
+                not_found_txid,
+            ]
+            return {
+                ready_txid: _kraken_order(ready_txid),
+                already_txid: _kraken_order(already_txid),
+                unsupported_txid: _kraken_order(
+                    unsupported_txid,
+                    side="sell",
+                ),
+            }
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.post(
+        "/api/history/import/preview",
+        json={
+            "txids": [
+                ready_txid,
+                already_txid,
+                unsupported_txid,
+                not_found_txid,
+            ],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["imported_count"] == 0
+    assert data["skipped_count"] == 0
+    items = {item["txid"]: item for item in data["items"]}
+    assert items[ready_txid]["status"] == "ready"
+    assert items[ready_txid]["row"]["total_price"] == "20.8858"
+    assert items[ready_txid]["target_file"] == "orders.csv"
+    assert items[already_txid]["status"] == "already_imported"
+    assert items[already_txid]["row"] is None
+    assert items[already_txid]["target_file"] == "orders.csv"
+    assert items[unsupported_txid]["status"] == "unsupported"
+    assert items[unsupported_txid]["target_file"] is None
+    assert items[not_found_txid]["status"] == "not_found"
+    assert captured_keys == [("FILE_PUBLIC", "FILE_PRIVATE")]
+    assert str(tmp_orders_path(path)) not in json.dumps(data)
+
+
+def test_history_import_appends_selected_orders(
+    authed_client,
+    monkeypatch,
+) -> None:
+    txid = "OCYS4K-OILOE-36HPAE"
+    skipped_txid = "OMHP5J-W3RDC-C7LHOO"
+    config = valid_config()
+    config["orders_filepath"] = "orders.csv"
+    client, _path, csrf = authed_client(config)
+
+    class FakeKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def query_orders(self, _txids: list[str]) -> dict:
+            return {
+                txid: _kraken_order(txid),
+                skipped_txid: _kraken_order(skipped_txid),
+            }
+
+        def get_pair_ticker(self, _pair: str) -> dict:
+            return {}
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.post(
+        "/api/history/import",
+        json={
+            "txids": [txid, skipped_txid],
+            "selected_txids": [txid],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    history_response = client.get("/api/history")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["imported_count"] == 1
+    assert data["skipped_count"] == 0
+    assert [item["status"] for item in data["items"]] == ["ready", "ready"]
+    assert history_response.status_code == 200
+    entries = history_response.json()["data"]["entries"]
+    assert [entry["txid"] for entry in entries] == [txid]
+    assert entries[0]["total_price"] == "20.8858"
+
+
+def test_history_import_uses_env_backed_kraken_credentials(
+    authed_client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("KRAKEN_API_PUBLIC_KEY", "ENV_PUBLIC")
+    monkeypatch.setenv("KRAKEN_API_PRIVATE_KEY", "ENV_PRIVATE")
+    config = valid_config()
+    config.pop("api")
+    client, _path, csrf = authed_client(config)
+    captured_keys = []
+
+    class FakeKrakenClient:
+        def __init__(self, public_key: str, private_key: str) -> None:
+            captured_keys.append((public_key, private_key))
+
+        def query_orders(self, _txids: list[str]) -> dict:
+            return {}
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.post(
+        "/api/history/import/preview",
+        json={"txids": ["OCYS4K-OILOE-36HPAE"]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 200
+    assert captured_keys == [("ENV_PUBLIC", "ENV_PRIVATE")]
+
+
+def test_history_import_response_does_not_expose_absolute_path(
+    authed_client,
+    monkeypatch,
+) -> None:
+    txid = "OCYS4K-OILOE-36HPAE"
+    config = valid_config()
+    config["dca_pairs"][0]["orders_filepath"] = "pair-orders.csv"
+    client, path, csrf = authed_client(config)
+
+    class FakeKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def query_orders(self, _txids: list[str]) -> dict:
+            return {txid: _kraken_order(txid)}
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+
+    response = client.post(
+        "/api/history/import/preview",
+        json={"txids": [txid]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    data = response.json()["data"]
+    assert response.status_code == 200
+    assert data["items"][0]["target_file"] == "pair-orders.csv"
+    assert str(tmp_orders_path(path).parent) not in json.dumps(data)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_field"),
+    [
+        ({"txids": []}, "txids"),
+        ({"txids": ["not-an-order"]}, "txids.not-an-order"),
+        (
+            {
+                "txids": [
+                    f"O{index:05d}-ABCDE-F{index:05d}"
+                    for index in range(51)
+                ],
+            },
+            "txids",
+        ),
+    ],
+)
+def test_history_import_preview_rejects_invalid_txids(
+    authed_client,
+    payload,
+    expected_field,
+) -> None:
+    client, _path, csrf = authed_client(valid_config())
+
+    response = client.post(
+        "/api/history/import/preview",
+        json=payload,
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+    assert expected_field in response.json()["error"]["fields"]
+
+
+def test_history_import_preview_rejects_missing_kraken_credentials(
+    authed_client,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("KRAKEN_API_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("KRAKEN_API_PRIVATE_KEY", raising=False)
+    config = valid_config()
+    config.pop("api")
+    client, _path, csrf = authed_client(config)
+
+    response = client.post(
+        "/api/history/import/preview",
+        json={"txids": ["OCYS4K-OILOE-36HPAE"]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+    assert "api.public_key" in response.json()["error"]["fields"]
+
+
+def test_history_import_preview_maps_kraken_errors_to_api_error(
+    authed_client,
+    monkeypatch,
+) -> None:
+    client, _path, csrf = authed_client(valid_config())
+
+    class FailingKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def query_orders(self, _txids: list[str]) -> dict:
+            raise ConnectionError("network down")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FailingKrakenClient,
+    )
+
+    response = client.post(
+        "/api/history/import/preview",
+        json={"txids": ["OCYS4K-OILOE-36HPAE"]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "kraken_error"
+
+
+def test_history_import_maps_csv_value_error_to_api_error(
+    authed_client,
+    monkeypatch,
+) -> None:
+    txid = "OCYS4K-OILOE-36HPAE"
+    client, _path, csrf = authed_client(valid_config())
+
+    class FakeKrakenClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def query_orders(self, _txids: list[str]) -> dict:
+            return {txid: _kraken_order(txid)}
+
+    def fail_import(*_args, **_kwargs):
+        raise ValueError("bad csv")
+
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.KrakenClient",
+        FakeKrakenClient,
+    )
+    monkeypatch.setattr(
+        "krakendca.web.routes_history.import_order_history_rows",
+        fail_import,
+    )
+
+    response = client.post(
+        "/api/history/import",
+        json={"txids": [txid], "selected_txids": [txid]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "history_import_failed"
+
+
 def test_history_returns_empty_state_for_missing_orders_file(
     authed_client,
 ) -> None:
@@ -1137,4 +1478,30 @@ def _history_row(
         "total_price": total_price,
         "txid": txid,
         "description": f"buy {volume} {pair} @ limit 2000",
+    }
+
+
+def _kraken_order(
+    txid: str,
+    *,
+    pair: str = "XETHZEUR",
+    side: str = "buy",
+    status: str = "closed",
+) -> dict:
+    return {
+        "status": status,
+        "descr": {
+            "pair": pair,
+            "type": side,
+            "ordertype": "limit",
+            "price": "2083.16",
+            "order": f"{side} 0.01 {pair} @ limit 2083.16",
+        },
+        "opentm": 1720000000.0,
+        "closetm": 1720000060.0,
+        "vol_exec": "0.01",
+        "cost": "20.8316",
+        "fee": "0.0542",
+        "oflags": "fciq",
+        "txid": txid,
     }
