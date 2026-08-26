@@ -16,6 +16,7 @@ from krakendca.order_history_csv import (
     order_history_file_lock,
     read_order_history_txids,
     sanitize_csv_value,
+    validate_order_history_writable,
 )
 
 ORDER_TXID_PATTERN = re.compile(r"^[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{6}$")
@@ -143,6 +144,8 @@ def import_order_history_rows(
             path: read_order_history_txids(path)
             for path in target_paths
         }
+        for path in target_paths:
+            validate_order_history_writable(path)
 
         imported_count = 0
         skipped_count = 0

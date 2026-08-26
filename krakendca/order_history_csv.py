@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
+import tempfile
 import threading
 from pathlib import Path
 from typing import MutableMapping
@@ -73,6 +74,33 @@ def read_order_history_txids(path: Path) -> set[str]:
             }
     except (csv.Error, OSError) as exc:
         raise ValueError(f"Can't read order history -> {exc}") from exc
+
+
+def validate_order_history_writable(path: Path) -> None:
+    """Validate an order history target can be written before importing rows."""
+    if path.exists() and path.is_dir():
+        raise ValueError("existing order history has unexpected columns")
+    if path.exists():
+        try:
+            with path.open("a", newline="", encoding="utf-8"):
+                pass
+        except OSError as exc:
+            raise ValueError(f"Can't save order history -> {exc}") from exc
+        return
+
+    parent = path.parent
+    if not parent.exists() or not parent.is_dir():
+        raise ValueError("Can't save order history -> parent directory is not writable")
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent,
+            prefix=f".{path.name}.",
+        ):
+            pass
+    except OSError as exc:
+        raise ValueError(f"Can't save order history -> {exc}") from exc
 
 
 def append_order_history_row(path: Path, row: dict[str, str]) -> None:

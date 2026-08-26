@@ -376,6 +376,25 @@ def test_import_validates_all_target_files_before_writing_any_row(tmp_path) -> N
     assert malformed_target.read_text(encoding="utf-8") == "wrong\n"
 
 
+def test_import_validates_missing_target_parents_before_writing_any_row(tmp_path) -> None:
+    valid_target = tmp_path / "aaa-orders.csv"
+    missing_parent_target = tmp_path / "zzz-missing" / "orders.csv"
+    ready_items = [
+        _targeted_ready_item(valid_target, txid=READY_TXID),
+        _targeted_ready_item(missing_parent_target, txid=SECOND_TXID),
+    ]
+
+    with pytest.raises(ValueError, match="Can't save order history"):
+        import_order_history_rows(
+            ready_items,
+            {READY_TXID, SECOND_TXID},
+            {},
+        )
+
+    assert not valid_target.exists()
+    assert not missing_parent_target.exists()
+
+
 class _TrackingLock:
     def __init__(self) -> None:
         self.acquired = 0
