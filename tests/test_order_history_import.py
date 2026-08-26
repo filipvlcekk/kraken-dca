@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -313,6 +314,35 @@ def test_order_history_file_lock_normalizes_relative_and_absolute_paths(
     assert list(locks) == [(tmp_path / "orders.csv").resolve(strict=False)]
 
 
+def test_import_dedupes_mixed_paths_to_same_target_before_locking(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "orders.csv"
+    lock = _NonReentrantTrackingLock()
+    locks = {target.resolve(strict=False): lock}
+    ready_items = [
+        _targeted_ready_item(Path("orders.csv"), txid=READY_TXID),
+        _targeted_ready_item(target, txid=SECOND_TXID),
+    ]
+
+    result = import_order_history_rows(
+        ready_items,
+        {READY_TXID, SECOND_TXID},
+        locks,
+    )
+
+    assert result.imported_count == 2
+    assert result.skipped_count == 0
+    assert lock.acquired == 1
+    assert lock.released == 1
+    assert [row["txid"] for row in _read_history(target)] == [
+        READY_TXID,
+        SECOND_TXID,
+    ]
+
+
 def test_import_creates_missing_csv_with_exact_header(tmp_path) -> None:
     target = tmp_path / "orders.csv"
 
@@ -419,3 +449,19 @@ class _TrackingLock:
 
     def release(self) -> None:
         self.released += 1
+
+
+class _NonReentrantTrackingLock(_TrackingLock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.locked = False
+
+    def acquire(self) -> None:
+        if self.locked:
+            raise RuntimeError("lock acquired twice")
+        self.locked = True
+        super().acquire()
+
+    def release(self) -> None:
+        self.locked = False
+        super().release()

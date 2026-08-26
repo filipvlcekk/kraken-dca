@@ -14,6 +14,7 @@ from krakendca.order_history_csv import (
     ORDER_HISTORY_FIELDNAMES,
     append_order_history_row,
     order_history_file_lock,
+    order_history_lock_path,
     read_order_history_txids,
     sanitize_csv_value,
     validate_order_history_writable,
@@ -129,22 +130,29 @@ def import_order_history_rows(
         and item.row is not None
         and item.target_path is not None
     ]
+    target_paths_by_lock_path = {}
+    for item in selected_ready_items:
+        assert item.target_path is not None
+        target_paths_by_lock_path.setdefault(
+            order_history_lock_path(item.target_path),
+            item.target_path,
+        )
     target_paths = sorted(
-        {item.target_path for item in selected_ready_items},
-        key=lambda path: str(path),
+        target_paths_by_lock_path.items(),
+        key=lambda path_item: str(path_item[0]),
     )
     acquired_locks = []
     try:
-        for path in target_paths:
-            lock = order_history_file_lock(path, locks)
+        for lock_path, _path in target_paths:
+            lock = order_history_file_lock(lock_path, locks)
             lock.acquire()
             acquired_locks.append(lock)
 
         existing_by_path = {
-            path: read_order_history_txids(path)
-            for path in target_paths
+            lock_path: read_order_history_txids(path)
+            for lock_path, path in target_paths
         }
-        for path in target_paths:
+        for _lock_path, path in target_paths:
             validate_order_history_writable(path)
 
         imported_count = 0
@@ -152,7 +160,8 @@ def import_order_history_rows(
         for item in selected_ready_items:
             assert item.row is not None
             assert item.target_path is not None
-            existing_txids = existing_by_path[item.target_path]
+            lock_path = order_history_lock_path(item.target_path)
+            existing_txids = existing_by_path[lock_path]
             if item.txid in existing_txids:
                 skipped_count += 1
                 continue
