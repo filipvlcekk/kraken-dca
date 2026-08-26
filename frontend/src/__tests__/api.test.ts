@@ -7,6 +7,8 @@ import {
   loadSchedulerStatus,
   login,
   logout,
+  importHistoryOrders,
+  previewHistoryImport,
   reloadScheduler,
   restoreSession,
   runPairNow,
@@ -33,6 +35,8 @@ describe('API client', () => {
     expect(logout).toBeTypeOf('function')
     expect(loadConfig).toBeTypeOf('function')
     expect(loadHistory).toBeTypeOf('function')
+    expect(previewHistoryImport).toBeTypeOf('function')
+    expect(importHistoryOrders).toBeTypeOf('function')
     expect(saveConfig).toBeTypeOf('function')
     expect(loadSchedulerStatus).toBeTypeOf('function')
     expect(reloadScheduler).toBeTypeOf('function')
@@ -102,6 +106,63 @@ describe('API client', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-token' }),
+      }),
+    )
+  })
+
+  it('previews history imports with txids and csrf token', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      ok: true,
+      data: {
+        items: [],
+        imported_count: 0,
+        skipped_count: 0,
+      },
+    }))
+
+    await previewHistoryImport(['OABC12-DEF34-GHI567'], 'csrf-token')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/history/import/preview',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': 'csrf-token',
+        }),
+        body: JSON.stringify({ txids: ['OABC12-DEF34-GHI567'] }),
+      }),
+    )
+  })
+
+  it('imports selected history orders with selected txids and csrf token', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      ok: true,
+      data: {
+        items: [],
+        imported_count: 1,
+        skipped_count: 0,
+      },
+    }))
+
+    await importHistoryOrders(
+      ['OABC12-DEF34-GHI567', 'OXYZ12-DEF34-GHI567'],
+      ['OABC12-DEF34-GHI567'],
+      'csrf-token',
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/history/import',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': 'csrf-token',
+        }),
+        body: JSON.stringify({
+          txids: ['OABC12-DEF34-GHI567', 'OXYZ12-DEF34-GHI567'],
+          selected_txids: ['OABC12-DEF34-GHI567'],
+        }),
       }),
     )
   })

@@ -149,6 +149,27 @@ export type HistoryResponse = {
   valuation: HistoryValuationStatus
 }
 
+export type HistoryImportStatus =
+  | 'ready'
+  | 'already_imported'
+  | 'not_found'
+  | 'not_closed'
+  | 'unsupported'
+
+export type HistoryImportItem = {
+  txid: string
+  status: HistoryImportStatus
+  message: string | null
+  row: HistoryEntry | null
+  target_file: string | null
+}
+
+export type HistoryImportResponse = {
+  items: HistoryImportItem[]
+  imported_count: number
+  skipped_count: number
+}
+
 export type RunResult = {
   pair: string
   status: 'completed' | 'skipped' | 'failed' | 'success'
@@ -194,6 +215,29 @@ export function loadConfig(): Promise<ApiResponse<ConfigResponse>> {
 
 export function loadHistory(): Promise<ApiResponse<HistoryResponse>> {
   return request('/api/history')
+}
+
+export function previewHistoryImport(
+  txids: string[],
+  csrfToken: string,
+): Promise<ApiResponse<HistoryImportResponse>> {
+  return request('/api/history/import/preview', {
+    method: 'POST',
+    csrfToken,
+    body: { txids },
+  })
+}
+
+export function importHistoryOrders(
+  txids: string[],
+  selectedTxids: string[],
+  csrfToken: string,
+): Promise<ApiResponse<HistoryImportResponse>> {
+  return request('/api/history/import', {
+    method: 'POST',
+    csrfToken,
+    body: { txids, selected_txids: selectedTxids },
+  })
 }
 
 export function saveConfig(
