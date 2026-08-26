@@ -26,13 +26,17 @@ ORDER_HISTORY_FIELDNAMES = [
 ORDER_HISTORY_FILE_LOCKS: dict[Path, threading.Lock] = {}
 
 
+def _normalized_order_history_path(path: Path | str) -> Path:
+    return Path(path).expanduser().resolve(strict=False)
+
+
 def order_history_file_lock(
     path: Path | str,
     locks: MutableMapping[Path, threading.Lock] | None = None,
 ):
     """Return the process-local lock for an order history CSV path."""
     lock_registry = ORDER_HISTORY_FILE_LOCKS if locks is None else locks
-    return lock_registry.setdefault(Path(path), threading.Lock())
+    return lock_registry.setdefault(_normalized_order_history_path(path), threading.Lock())
 
 
 def sanitize_csv_value(value: object) -> object:

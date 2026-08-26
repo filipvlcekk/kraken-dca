@@ -8,7 +8,7 @@ from datetime import datetime
 import pytest
 
 from krakendca.order import Order
-from krakendca.order_history_csv import ORDER_HISTORY_FILE_LOCKS
+from krakendca.order_history_csv import ORDER_HISTORY_FILE_LOCKS, order_history_file_lock
 from krakendca.order_history_import import (
     ImportPreviewItem,
     ORDER_HISTORY_FIELDNAMES,
@@ -297,6 +297,20 @@ def test_import_and_order_save_use_shared_default_file_lock(tmp_path) -> None:
 
     assert lock.acquired == 2
     assert lock.released == 2
+
+
+def test_order_history_file_lock_normalizes_relative_and_absolute_paths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    locks = {}
+
+    relative_lock = order_history_file_lock("orders.csv", locks)
+    absolute_lock = order_history_file_lock(tmp_path / "orders.csv", locks)
+
+    assert relative_lock is absolute_lock
+    assert list(locks) == [(tmp_path / "orders.csv").resolve(strict=False)]
 
 
 def test_import_creates_missing_csv_with_exact_header(tmp_path) -> None:
