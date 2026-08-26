@@ -1,11 +1,15 @@
 """Order object module."""
 import csv
-import re
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import TypeVar
 
 from krakendca.kraken_client import KrakenClient
+from krakendca.order_history_csv import (
+    order_history_file_lock,
+    read_order_csv_header,
+    sanitize_csv_value,
+)
 
 T = TypeVar("T", bound="Order")
 
@@ -146,23 +150,28 @@ class Order:
             for key, value in self.__dict__.items()
         }
         fieldnames = list(sanitized_order)
+        lock = order_history_file_lock(orders_filepath)
+        lock.acquire()
         try:
-            existing_fieldnames = self._read_order_csv_header(
-                orders_filepath,
-            )
-            if existing_fieldnames and existing_fieldnames != fieldnames:
-                raise ValueError(
-                    "existing order history has unexpected columns"
+            try:
+                existing_fieldnames = self._read_order_csv_header(
+                    orders_filepath,
                 )
-            write_header = not existing_fieldnames
-            mode = "a" if existing_fieldnames else "w"
-            with open(orders_filepath, mode, newline="") as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-                if write_header:
-                    writer.writeheader()
-                writer.writerow(sanitized_order)
-        except (csv.Error, OSError) as e:
-            raise ValueError(f"Can't save order history -> {e}")
+                if existing_fieldnames and existing_fieldnames != fieldnames:
+                    raise ValueError(
+                        "existing order history has unexpected columns"
+                    )
+                write_header = not existing_fieldnames
+                mode = "a" if existing_fieldnames else "w"
+                with open(orders_filepath, mode, newline="") as csv_file:
+                    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                    if write_header:
+                        writer.writeheader()
+                    writer.writerow(sanitized_order)
+            except (csv.Error, OSError) as e:
+                raise ValueError(f"Can't save order history -> {e}")
+        finally:
+            lock.release()
 
     @staticmethod
     def set_order_volume(
@@ -247,14 +256,8 @@ class Order:
     @staticmethod
     def _sanitize_csv_value(value: object) -> object:
         """Prefix formula-like strings to avoid CSV injection."""
-        if isinstance(value, str) and re.match(r"^\s*[=+\-@]", value):
-            return f"'{value}"
-        return value
+        return sanitize_csv_value(value)
 
     @staticmethod
     def _read_order_csv_header(orders_filepath: str) -> list[str]:
-        try:
-            with open(orders_filepath, newline="") as csv_file:
-                return next(csv.reader(csv_file), [])
-        except FileNotFoundError:
-            return []
+        return read_order_csv_header(orders_filepath)

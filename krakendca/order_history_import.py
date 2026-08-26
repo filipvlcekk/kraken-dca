@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import re
 import threading
 from dataclasses import dataclass
@@ -11,22 +10,16 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import MutableMapping
 
+from krakendca.order_history_csv import (
+    ORDER_HISTORY_FIELDNAMES,
+    append_order_history_row,
+    order_history_file_lock,
+    read_order_history_txids,
+    sanitize_csv_value,
+)
+
 ORDER_TXID_PATTERN = re.compile(r"^[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{6}$")
 MAX_IMPORT_TXIDS = 50
-ORDER_HISTORY_FIELDNAMES = [
-    "date",
-    "pair",
-    "type",
-    "order_type",
-    "o_flags",
-    "pair_price",
-    "volume",
-    "price",
-    "fee",
-    "total_price",
-    "txid",
-    "description",
-]
 
 
 @dataclass(frozen=True)
@@ -124,7 +117,7 @@ def preview_order_import(
 def import_order_history_rows(
     items: list[ImportPreviewItem],
     selected_txids: set[str],
-    locks: MutableMapping[Path, threading.Lock],
+    locks: MutableMapping[Path, threading.Lock] | None = None,
 ) -> ImportResult:
     """Append selected ready preview rows into their target CSV files."""
     selected_ready_items = [
@@ -142,12 +135,12 @@ def import_order_history_rows(
     acquired_locks = []
     try:
         for path in target_paths:
-            lock = locks.setdefault(path, threading.Lock())
+            lock = order_history_file_lock(path, locks)
             lock.acquire()
             acquired_locks.append(lock)
 
         existing_by_path = {
-            path: _read_existing_txids(path)
+            path: read_order_history_txids(path)
             for path in target_paths
         }
 
@@ -160,7 +153,7 @@ def import_order_history_rows(
             if item.txid in existing_txids:
                 skipped_count += 1
                 continue
-            _append_row(item.target_path, item.row)
+            append_order_history_row(item.target_path, item.row)
             existing_txids.add(item.txid)
             imported_count += 1
         return ImportResult(
@@ -212,8 +205,13 @@ def _preview_closed_order(
     except InvalidOperation:
         return _unsupported(txid, "unsupported order: invalid cost or fee.")
 
+    try:
+        order_date = _order_date(order)
+    except (OverflowError, TypeError, ValueError):
+        return _unsupported(txid, "unsupported order: invalid timestamp.")
+
     row = {
-        "date": _order_date(order),
+        "date": order_date,
         "pair": configured_pair,
         "type": str(descr["type"]),
         "order_type": str(descr["ordertype"]),
@@ -231,7 +229,7 @@ def _preview_closed_order(
         "description": str(descr["order"]),
     }
     sanitized_row = {
-        field: _sanitize_csv_value(value)
+        field: str(sanitize_csv_value(value))
         for field, value in row.items()
     }
     return ImportPreviewItem(
@@ -302,49 +300,6 @@ def _pair_aliases(pair_config: dict) -> set[str]:
 def _existing_history_txids(paths) -> dict[str, Path]:
     txids = {}
     for _configured_pair, path in set(paths):
-        for txid in _read_existing_txids(path):
+        for txid in read_order_history_txids(path):
             txids[txid] = path
     return txids
-
-
-def _read_existing_txids(path: Path) -> set[str]:
-    if path.exists() and path.is_dir():
-        raise ValueError("existing order history has unexpected columns")
-    if not path.exists() or path.stat().st_size == 0:
-        return set()
-    try:
-        with path.open(newline="", encoding="utf-8") as csv_file:
-            reader = csv.DictReader(csv_file)
-            _validate_exact_header(reader.fieldnames)
-            return {
-                row.get("txid", "")
-                for row in reader
-                if row.get("txid")
-            }
-    except (csv.Error, OSError) as exc:
-        raise ValueError(f"Can't read order history -> {exc}") from exc
-
-
-def _validate_exact_header(fieldnames: list[str] | None) -> None:
-    if fieldnames != ORDER_HISTORY_FIELDNAMES:
-        raise ValueError("existing order history has unexpected columns")
-
-
-def _append_row(path: Path, row: dict[str, str]) -> None:
-    _validate_exact_header(list(row))
-    write_header = not path.exists() or path.stat().st_size == 0
-    mode = "w" if write_header else "a"
-    try:
-        with path.open(mode, newline="", encoding="utf-8") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=ORDER_HISTORY_FIELDNAMES)
-            if write_header:
-                writer.writeheader()
-            writer.writerow(row)
-    except (csv.Error, OSError) as exc:
-        raise ValueError(f"Can't save order history -> {exc}") from exc
-
-
-def _sanitize_csv_value(value: str) -> str:
-    if re.match(r"^\s*[=+\-@]", value):
-        return f"'{value}"
-    return value

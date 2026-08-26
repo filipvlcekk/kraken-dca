@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 
 import pytest
 
+from krakendca.order import Order
+from krakendca.order_history_csv import ORDER_HISTORY_FILE_LOCKS
 from krakendca.order_history_import import (
     ImportPreviewItem,
     ORDER_HISTORY_FIELDNAMES,
@@ -42,6 +45,7 @@ def _kraken_order(
     cost: str | None = "20.8316",
     fee: str | None = "0.0542",
     oflags: str | None = "fciq",
+    closetm: float | str | None = 1720000060.0,
     description: str | None = "buy 0.01 XETHZEUR @ limit 2083.16",
 ) -> dict:
     descr = {
@@ -55,7 +59,7 @@ def _kraken_order(
         "status": status,
         "descr": descr,
         "opentm": 1720000000.0,
-        "closetm": 1720000060.0,
+        "closetm": closetm,
         "vol_exec": vol_exec,
         "cost": cost,
         "fee": fee,
@@ -253,6 +257,48 @@ def test_preview_sanitizes_kraken_derived_formula_strings(tmp_path) -> None:
     assert item.row["description"] == "'@malicious"
 
 
+def test_preview_marks_malformed_timestamp_unsupported(tmp_path) -> None:
+    item = preview_order_import(
+        [READY_TXID],
+        {READY_TXID: _kraken_order(closetm="not-a-timestamp")},
+        _config(),
+        str(tmp_path / "config.yaml"),
+    )[0]
+
+    assert item.status == "unsupported"
+    assert item.row is None
+    assert "invalid timestamp" in item.message
+
+
+def test_import_and_order_save_use_shared_default_file_lock(tmp_path) -> None:
+    target = tmp_path / "orders.csv"
+    lock = _TrackingLock()
+    ORDER_HISTORY_FILE_LOCKS[target] = lock
+    try:
+        order = Order(
+            datetime.strptime("2021-04-15 21:33:28", "%Y-%m-%d %H:%M:%S"),
+            "XETHZEUR",
+            "buy",
+            "limit",
+            "fciq",
+            2083.16,
+            0.00957589,
+            19.9481,
+            0.0519,
+            20.0,
+        )
+        order.txid = SECOND_TXID
+        order.description = "buy 0.00957589 ETHEUR @ limit 2083.16"
+
+        order.save_order_csv(str(target))
+        import_order_history_rows([_ready_item(tmp_path)], {READY_TXID})
+    finally:
+        ORDER_HISTORY_FILE_LOCKS.pop(target, None)
+
+    assert lock.acquired == 2
+    assert lock.released == 2
+
+
 def test_import_creates_missing_csv_with_exact_header(tmp_path) -> None:
     target = tmp_path / "orders.csv"
 
@@ -328,3 +374,15 @@ def test_import_validates_all_target_files_before_writing_any_row(tmp_path) -> N
 
     assert not valid_target.exists()
     assert malformed_target.read_text(encoding="utf-8") == "wrong\n"
+
+
+class _TrackingLock:
+    def __init__(self) -> None:
+        self.acquired = 0
+        self.released = 0
+
+    def acquire(self) -> None:
+        self.acquired += 1
+
+    def release(self) -> None:
+        self.released += 1
