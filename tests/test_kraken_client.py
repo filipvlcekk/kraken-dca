@@ -204,3 +204,47 @@ def test_create_order_uses_add_order_payload_names() -> None:
     assert "price=100.0" in body
     assert "volume=1.0" in body
     assert "oflags=fciq" in body
+
+
+def test_query_orders_uses_txid_payload() -> None:
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "error": [],
+                "result": {
+                    "OCYS4K-OILOE-36HPAE": {
+                        "status": "closed",
+                        "descr": {
+                            "pair": "XETHZEUR",
+                            "type": "buy",
+                            "ordertype": "limit",
+                            "price": "2083.16",
+                            "order": "buy 0.01 XETHZEUR @ limit 2083.16",
+                        },
+                        "opentm": 1720000000.0,
+                        "closetm": 1720000060.0,
+                        "vol_exec": "0.01",
+                        "cost": "20.8316",
+                        "fee": "0.0542",
+                        "oflags": "fciq",
+                    }
+                },
+            },
+        )
+
+    client = KrakenClient(
+        "public-key",
+        "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3"
+        "pd5nE9qa99HAZtuZuj6F1huXg==",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = client.query_orders(["OCYS4K-OILOE-36HPAE"])
+
+    body = requests[0].content.decode()
+    assert result["OCYS4K-OILOE-36HPAE"]["status"] == "closed"
+    assert "txid=OCYS4K-OILOE-36HPAE" in body

@@ -95,6 +95,10 @@ class KrakenClient:
         """Get closed orders keyed by txid."""
         return self._private("ClosedOrders", query).get("closed")
 
+    def query_orders(self, txids: list[str]) -> dict:
+        """Get orders keyed by txid."""
+        return self._private("QueryOrders", {"txid": ",".join(txids)})
+
     def create_order(
         self,
         pair: str,
