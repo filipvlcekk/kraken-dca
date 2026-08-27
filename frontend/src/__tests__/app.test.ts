@@ -256,6 +256,106 @@ describe('App shell', () => {
     expect(wrapper.text()).toContain('Save config')
   })
 
+  it('refreshes order history after importing selected orders', async () => {
+    const readyTxid = 'ABC123-DEFGH-IJKLMN'
+    const historyRequests: string[] = []
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/session') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            authenticated: true,
+            csrf_token: 'csrf-token',
+          },
+        }))
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            config: {
+              dca_pairs: [],
+            },
+            secrets: emptySecrets,
+            config_valid: true,
+            validation_errors: {},
+          },
+        }))
+      }
+      if (path === '/api/scheduler') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            running: true,
+            config_applied: true,
+            saved_config_fingerprint: 'saved',
+            active_config_fingerprint: 'active',
+            reload_error: null,
+            last_reload_at: null,
+            jobs: [],
+          },
+        }))
+      }
+      if (path === '/api/history') {
+        historyRequests.push(path)
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: historyRequests.length === 1
+            ? historyWithEntry('OLDTX1-ABCDE-QRSTUV', 'XXBTZEUR', '50.10')
+            : historyWithEntry(readyTxid, 'XETHZEUR', '75.25'),
+        }))
+      }
+      if (path === '/api/history/import/preview') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            imported_count: 0,
+            skipped_count: 0,
+            items: [
+              {
+                txid: readyTxid,
+                status: 'ready',
+                message: 'Ready to import.',
+                row: null,
+                target_file: null,
+              },
+            ],
+          },
+        }))
+      }
+      if (path === '/api/history/import') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          data: {
+            imported_count: 1,
+            skipped_count: 0,
+            items: [],
+          },
+        }))
+      }
+      return Promise.resolve(jsonResponse({ ok: true, data: {} }))
+    })
+
+    const wrapper = mount(App)
+    await flushDashboard()
+
+    expect(historyRequests).toHaveLength(1)
+    expect(wrapper.text()).toContain('XXBTZEUR')
+
+    await wrapper.get('button[aria-label="Import orders"]').trigger('click')
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxid)
+    await wrapper.get('button[aria-label="Preview import"]').trigger('click')
+    await flushPromises()
+    await wrapper.get(`input[aria-label="Select ${readyTxid}"]`).setValue(true)
+    await wrapper.get('button[aria-label="Import selected"]').trigger('click')
+    await flushDashboard()
+
+    expect(historyRequests).toHaveLength(2)
+    expect(wrapper.text()).toContain('XETHZEUR')
+    expect(wrapper.text()).toContain('75.25')
+  })
+
   it('keeps the pair input mounted while editing the pair value', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = String(input)
@@ -395,4 +495,64 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function historyWithEntry(txid: string, pair: string, totalPrice: string) {
+  return {
+    entries: [
+      {
+        date: '2026-07-21T10:00:00',
+        pair,
+        type: 'buy',
+        order_type: 'limit',
+        o_flags: 'fciq',
+        pair_price: '2500',
+        volume: '0.02',
+        price: '50',
+        fee: '0.10',
+        total_price: totalPrice,
+        txid,
+        description: `buy 0.02 ${pair} @ limit 2500`,
+      },
+    ],
+    pairs: [
+      {
+        pair,
+        trade_count: 1,
+        total_volume: '0.02',
+        total_spent: totalPrice,
+        total_price: '50',
+        total_fees: '0.10',
+        average_buy_price: '2500',
+        last_trade_at: '2026-07-21T10:00:00',
+        last_trade_txid: txid,
+        current_price: '3000',
+        estimated_value: '60',
+        estimated_pl: '9.90',
+      },
+    ],
+    portfolio: {
+      trade_count: 1,
+      total_spent: totalPrice,
+      total_price: '50',
+      total_fees: '0.10',
+      estimated_value: '60',
+      estimated_pl: '9.90',
+    },
+    chart: [
+      {
+        date: '2026-07-21T10:00:00',
+        pair,
+        txid,
+        spent: totalPrice,
+        volume: '0.02',
+        cumulative_spent: totalPrice,
+        cumulative_volume: '0.02',
+      },
+    ],
+    valuation: {
+      status: 'live',
+      message: null,
+    },
+  }
 }

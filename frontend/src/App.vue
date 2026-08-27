@@ -6,6 +6,7 @@ import type { DcaPairConfig } from './api'
 import ConfigWarnings from './components/ConfigWarnings.vue'
 import CredentialEditor from './components/CredentialEditor.vue'
 import LoginView from './components/LoginView.vue'
+import OrderHistoryImportPanel from './components/OrderHistoryImportPanel.vue'
 import OrderHistoryTable from './components/OrderHistoryTable.vue'
 import PairEditor from './components/PairEditor.vue'
 import PairStatusPanel from './components/PairStatusPanel.vue'
@@ -77,6 +78,10 @@ async function runPairNow(pair: string): Promise<void> {
       await history.load()
     }
   }
+}
+
+async function refreshHistoryAfterImport(): Promise<void> {
+  await history.load()
 }
 
 function updatePair(index: number, pairConfig: DcaPairConfig): void {
@@ -200,6 +205,12 @@ function pairFieldErrors(index: number): Record<string, string> {
       <OrderHistoryTable
         v-if="history.state.history"
         :entries="history.state.history.entries"
+      />
+
+      <OrderHistoryImportPanel
+        v-if="auth.state.csrfToken !== null && history.state.history"
+        :csrf-token="auth.state.csrfToken"
+        @imported="refreshHistoryAfterImport"
       />
 
       <footer class="save-bar">
