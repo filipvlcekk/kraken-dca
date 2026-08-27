@@ -78,11 +78,12 @@ async function previewImport(csrfToken: string): Promise<void> {
   previewing.value = true
   errorMessage.value = null
   successMessage.value = null
+  const submittedTxids = [...parsedTxids.value]
   try {
-    const response = await previewHistoryImport(parsedTxids.value, csrfToken)
+    const response = await previewHistoryImport(submittedTxids, csrfToken)
     if (response.ok) {
       preview.value = response.data
-      previewedTxids.value = [...parsedTxids.value]
+      previewedTxids.value = submittedTxids
       selectedTxids.value = response.data.items
         .filter((item) => item.status === 'ready')
         .map((item) => item.txid)
@@ -104,15 +105,17 @@ async function importSelected(csrfToken: string): Promise<void> {
   importing.value = true
   errorMessage.value = null
   successMessage.value = null
+  const submittedPreviewTxids = [...previewTxids.value]
+  const submittedSelectedTxids = [...selectedReadyTxids.value]
   try {
     const response = await importHistoryOrders(
-      previewTxids.value,
-      selectedReadyTxids.value,
+      submittedPreviewTxids,
+      submittedSelectedTxids,
       csrfToken,
     )
     if (response.ok) {
       preview.value = response.data
-      previewedTxids.value = [...previewTxids.value]
+      previewedTxids.value = submittedPreviewTxids
       selectedTxids.value = response.data.items
         .filter((item) => item.status === 'ready')
         .map((item) => item.txid)

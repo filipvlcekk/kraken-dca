@@ -173,6 +173,27 @@ describe('OrderHistoryImportPanel', () => {
     expect(importHistoryOrdersMock).not.toHaveBeenCalled()
   })
 
+  it('does not treat an in-flight preview as current after txid input changes', async () => {
+    const preview = deferred<ReturnType<typeof responseWithItems>>()
+    previewHistoryImportMock.mockReturnValue(preview.promise.then((data) => ({ ok: true, data })))
+    const wrapper = mountPanel()
+    await wrapper.get('button[aria-label="Import orders"]').trigger('click')
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxid)
+    await wrapper.get('button[aria-label="Preview import"]').trigger('click')
+
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxidTwo)
+    preview.resolve(responseWithItems([item(readyTxid, 'ready')]))
+    await flushPromises()
+
+    const importButton = wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]')
+    expect(importButton.element.disabled).toBe(true)
+
+    await importButton.trigger('click')
+
+    expect(previewHistoryImportMock).toHaveBeenCalledWith([readyTxid], 'csrf-test-token')
+    expect(importHistoryOrdersMock).not.toHaveBeenCalled()
+  })
+
   it('serializes preview and import requests', async () => {
     const preview = deferred<ReturnType<typeof responseWithItems>>()
     previewHistoryImportMock.mockReturnValue(preview.promise.then((data) => ({ ok: true, data })))
