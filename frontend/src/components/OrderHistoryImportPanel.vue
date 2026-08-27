@@ -32,7 +32,7 @@ const parsedTxids = computed(() => {
   const txids: string[] = []
 
   for (const value of txidInput.value.split(/[\n,]/)) {
-    const txid = value.trim().toUpperCase()
+    const txid = value.trim()
     if (!TXID_PATTERN.test(txid) || seen.has(txid)) {
       continue
     }

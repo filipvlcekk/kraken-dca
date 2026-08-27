@@ -53,6 +53,20 @@ describe('OrderHistoryImportPanel', () => {
     expect(previewButton().element.disabled).toBe(false)
   })
 
+  it('rejects lowercase txids as invalid-looking', async () => {
+    const wrapper = mountPanel()
+    await wrapper.get('button[aria-label="Import orders"]').trigger('click')
+
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxid.toLowerCase())
+
+    const previewButton = wrapper.get<HTMLButtonElement>('button[aria-label="Preview import"]')
+    expect(previewButton.element.disabled).toBe(true)
+
+    await previewButton.trigger('click')
+
+    expect(previewHistoryImportMock).not.toHaveBeenCalled()
+  })
+
   it('parses newlines and commas into unique IDs', async () => {
     previewHistoryImportMock.mockResolvedValue({
       ok: true,
