@@ -157,6 +157,7 @@ def import_order_history_rows(
 
         imported_count = 0
         skipped_count = 0
+        imported_or_existing_txids = set()
         for item in selected_ready_items:
             assert item.row is not None
             assert item.target_path is not None
@@ -164,14 +165,21 @@ def import_order_history_rows(
             existing_txids = existing_by_path[lock_path]
             if item.txid in existing_txids:
                 skipped_count += 1
+                imported_or_existing_txids.add(item.txid)
                 continue
             append_order_history_row(item.target_path, item.row)
             existing_txids.add(item.txid)
+            imported_or_existing_txids.add(item.txid)
             imported_count += 1
         return ImportResult(
             imported_count=imported_count,
             skipped_count=skipped_count,
-            items=items,
+            items=[
+                _mark_already_imported(item)
+                if item.txid in imported_or_existing_txids
+                else item
+                for item in items
+            ],
         )
     finally:
         for lock in reversed(acquired_locks):
@@ -211,11 +219,18 @@ def _preview_closed_order(
     configured_pair, target_path = pair_match
 
     try:
-        total_price = str(
-            Decimal(str(order["cost"])) + Decimal(str(order["fee"]))
+        pair_price = _decimal_field(descr["price"], "descr.price")
+        volume = _decimal_field(order["vol_exec"], "vol_exec")
+        price = _decimal_field(order["cost"], "cost")
+        fee = _decimal_field(order["fee"], "fee")
+        total_price = price + fee
+        if not total_price.is_finite():
+            raise ValueError("total_price")
+    except ValueError as exc:
+        return _unsupported(
+            txid,
+            f"unsupported order: invalid numeric field: {exc}.",
         )
-    except InvalidOperation:
-        return _unsupported(txid, "unsupported order: invalid cost or fee.")
 
     try:
         order_date = _order_date(order)
@@ -224,30 +239,26 @@ def _preview_closed_order(
 
     row = {
         "date": order_date,
-        "pair": configured_pair,
-        "type": str(descr["type"]),
-        "order_type": str(descr["ordertype"]),
+        "pair": _csv_text(configured_pair),
+        "type": _csv_text(descr["type"]),
+        "order_type": _csv_text(descr["ordertype"]),
         "o_flags": (
             ""
             if order.get("oflags") is None
-            else str(order.get("oflags"))
+            else _csv_text(order.get("oflags"))
         ),
-        "pair_price": str(descr["price"]),
-        "volume": str(order["vol_exec"]),
-        "price": str(order["cost"]),
-        "fee": str(order["fee"]),
-        "total_price": total_price,
+        "pair_price": str(pair_price),
+        "volume": str(volume),
+        "price": str(price),
+        "fee": str(fee),
+        "total_price": str(total_price),
         "txid": txid,
-        "description": str(descr["order"]),
-    }
-    sanitized_row = {
-        field: str(sanitize_csv_value(value))
-        for field, value in row.items()
+        "description": _csv_text(descr["order"]),
     }
     return ImportPreviewItem(
         txid=txid,
         status="ready",
-        row=sanitized_row,
+        row=row,
         target_path=target_path,
     )
 
@@ -267,6 +278,20 @@ def _missing_required_fields(order: dict, descr: dict) -> str | None:
     return None
 
 
+def _decimal_field(value: object, field: str) -> Decimal:
+    try:
+        parsed = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError(field) from exc
+    if not parsed.is_finite():
+        raise ValueError(field)
+    return parsed
+
+
+def _csv_text(value: object) -> str:
+    return str(sanitize_csv_value(str(value)))
+
+
 def _order_date(order: dict) -> str:
     timestamp = order.get("closetm", order.get("opentm"))
     if timestamp in (None, ""):
@@ -279,6 +304,15 @@ def _order_date(order: dict) -> str:
 
 def _unsupported(txid: str, message: str) -> ImportPreviewItem:
     return ImportPreviewItem(txid=txid, status="unsupported", message=message)
+
+
+def _mark_already_imported(item: ImportPreviewItem) -> ImportPreviewItem:
+    return ImportPreviewItem(
+        txid=item.txid,
+        status="already_imported",
+        message="Order is already imported.",
+        target_path=item.target_path,
+    )
 
 
 def _configured_pair_targets(

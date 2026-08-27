@@ -1091,7 +1091,11 @@ def test_history_import_appends_selected_orders(
     data = response.json()["data"]
     assert data["imported_count"] == 1
     assert data["skipped_count"] == 0
-    assert [item["status"] for item in data["items"]] == ["ready", "ready"]
+    assert [item["status"] for item in data["items"]] == [
+        "already_imported",
+        "ready",
+    ]
+    assert data["items"][0]["row"] is None
     assert history_response.status_code == 200
     entries = history_response.json()["data"]["entries"]
     assert [entry["txid"] for entry in entries] == [txid]

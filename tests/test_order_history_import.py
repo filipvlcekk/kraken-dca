@@ -242,7 +242,6 @@ def test_preview_sanitizes_kraken_derived_formula_strings(tmp_path) -> None:
                 pair="=XETHZEUR",
                 configured_pair="=XETHZEUR",
                 oflags="+fciq",
-                price="-2083.16",
                 description="@malicious",
             )
         },
@@ -254,8 +253,31 @@ def test_preview_sanitizes_kraken_derived_formula_strings(tmp_path) -> None:
     assert item.row is not None
     assert item.row["pair"] == "'=XETHZEUR"
     assert item.row["o_flags"] == "'+fciq"
-    assert item.row["pair_price"] == "'-2083.16"
     assert item.row["description"] == "'@malicious"
+
+
+def test_preview_does_not_sanitize_valid_numeric_fields(tmp_path) -> None:
+    item = preview_order_import(
+        [READY_TXID],
+        {
+            READY_TXID: _kraken_order(
+                price="-2083.16",
+                vol_exec="-0.01",
+                cost="-20.8316",
+                fee="0.0542",
+            )
+        },
+        _config(),
+        str(tmp_path / "config.yaml"),
+    )[0]
+
+    assert item.status == "ready"
+    assert item.row is not None
+    assert item.row["pair_price"] == "-2083.16"
+    assert item.row["volume"] == "-0.01"
+    assert item.row["price"] == "-20.8316"
+    assert item.row["fee"] == "0.0542"
+    assert item.row["total_price"] == "-20.7774"
 
 
 def test_preview_marks_malformed_timestamp_unsupported(tmp_path) -> None:
@@ -269,6 +291,32 @@ def test_preview_marks_malformed_timestamp_unsupported(tmp_path) -> None:
     assert item.status == "unsupported"
     assert item.row is None
     assert "invalid timestamp" in item.message
+
+
+@pytest.mark.parametrize(
+    ("order", "message"),
+    [
+        (_kraken_order(price="not-a-price"), "invalid numeric field: descr.price"),
+        (_kraken_order(vol_exec="not-volume"), "invalid numeric field: vol_exec"),
+        (_kraken_order(cost="not-cost"), "invalid numeric field: cost"),
+        (_kraken_order(fee="not-fee"), "invalid numeric field: fee"),
+    ],
+)
+def test_preview_marks_invalid_numeric_fields_unsupported(
+    tmp_path,
+    order,
+    message,
+) -> None:
+    item = preview_order_import(
+        [READY_TXID],
+        {READY_TXID: order},
+        _config(),
+        str(tmp_path / "config.yaml"),
+    )[0]
+
+    assert item.status == "unsupported"
+    assert item.row is None
+    assert message in item.message
 
 
 def test_import_and_order_save_use_shared_default_file_lock(tmp_path) -> None:
@@ -358,6 +406,8 @@ def test_import_creates_missing_csv_with_exact_header(tmp_path) -> None:
         reader = csv.reader(csv_file)
         assert next(reader) == ORDER_HISTORY_FIELDNAMES
     assert _read_history(target) == [_row(txid=READY_TXID)]
+    assert result.items[0].status == "already_imported"
+    assert result.items[0].row is None
 
 
 def test_import_appends_to_existing_valid_csv(tmp_path) -> None:
@@ -398,6 +448,8 @@ def test_import_rechecks_duplicates_under_write_path(tmp_path) -> None:
     assert result.imported_count == 0
     assert result.skipped_count == 1
     assert [row["txid"] for row in _read_history(target)] == [READY_TXID]
+    assert result.items[0].status == "already_imported"
+    assert result.items[0].row is None
 
 
 def test_import_validates_all_target_files_before_writing_any_row(tmp_path) -> None:

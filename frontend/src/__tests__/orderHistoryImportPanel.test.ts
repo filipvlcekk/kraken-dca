@@ -129,7 +129,7 @@ describe('OrderHistoryImportPanel', () => {
     })
     importHistoryOrdersMock.mockResolvedValue({
       ok: true,
-      data: responseWithItems([item(readyTxidTwo, 'ready')], 1, 2),
+      data: responseWithItems([item(readyTxidTwo, 'already_imported')], 1, 2),
     })
     const wrapper = mountPanel()
     await wrapper.get('button[aria-label="Import orders"]').trigger('click')
@@ -148,6 +148,8 @@ describe('OrderHistoryImportPanel', () => {
     )
     expect(wrapper.emitted('imported')).toEqual([[]])
     expect(wrapper.text()).toContain('Imported 1 order')
+    expect(wrapper.find(`input[aria-label="Select ${readyTxidTwo}"]`).exists()).toBe(false)
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]').element.disabled).toBe(true)
   })
 
   it('requires a refreshed preview before importing after txid input changes', async () => {
