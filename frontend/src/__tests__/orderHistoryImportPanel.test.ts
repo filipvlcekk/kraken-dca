@@ -150,6 +150,56 @@ describe('OrderHistoryImportPanel', () => {
     expect(wrapper.text()).toContain('Imported 1 order')
   })
 
+  it('requires a refreshed preview before importing after txid input changes', async () => {
+    previewHistoryImportMock.mockResolvedValue({
+      ok: true,
+      data: responseWithItems([item(readyTxid, 'ready')]),
+    })
+    const wrapper = mountPanel()
+    await wrapper.get('button[aria-label="Import orders"]').trigger('click')
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxid)
+    await wrapper.get('button[aria-label="Preview import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]').element.disabled).toBe(false)
+
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxidTwo)
+
+    const importButton = wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]')
+    expect(importButton.element.disabled).toBe(true)
+
+    await importButton.trigger('click')
+
+    expect(importHistoryOrdersMock).not.toHaveBeenCalled()
+  })
+
+  it('serializes preview and import requests', async () => {
+    const preview = deferred<ReturnType<typeof responseWithItems>>()
+    previewHistoryImportMock.mockReturnValue(preview.promise.then((data) => ({ ok: true, data })))
+    const wrapper = mountPanel()
+    await wrapper.get('button[aria-label="Import orders"]').trigger('click')
+    await wrapper.get('textarea[aria-label="Order transaction ids"]').setValue(readyTxid)
+
+    await wrapper.get('button[aria-label="Preview import"]').trigger('click')
+
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Preview import"]').element.disabled).toBe(true)
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]').element.disabled).toBe(true)
+
+    preview.resolve(responseWithItems([item(readyTxid, 'ready')]))
+    await flushPromises()
+
+    const importing = deferred<ReturnType<typeof responseWithItems>>()
+    importHistoryOrdersMock.mockReturnValue(importing.promise.then((data) => ({ ok: true, data })))
+
+    await wrapper.get('button[aria-label="Import selected"]').trigger('click')
+
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Preview import"]').element.disabled).toBe(true)
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="Import selected"]').element.disabled).toBe(true)
+
+    importing.resolve(responseWithItems([], 1, 0))
+    await flushPromises()
+  })
+
   it('displays API errors without clearing preview data', async () => {
     previewHistoryImportMock.mockResolvedValueOnce({
       ok: true,
@@ -179,12 +229,14 @@ describe('OrderHistoryImportPanel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Import failed.')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Import failed.')
     expect(wrapper.text()).toContain(readyTxid)
 
     await wrapper.get('button[aria-label="Preview import"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Kraken rejected preview.')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Kraken rejected preview.')
     expect(wrapper.text()).toContain(readyTxid)
   })
 })
@@ -217,4 +269,14 @@ function responseWithItems(
     imported_count: importedCount,
     skipped_count: skippedCount,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, reject, resolve }
 }

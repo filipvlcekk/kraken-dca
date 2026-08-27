@@ -21,6 +21,7 @@ const TXID_PATTERN = /^[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{6}$/
 const expanded = ref(false)
 const txidInput = ref('')
 const preview = ref<HistoryImportResponse | null>(null)
+const previewedTxids = ref<string[]>([])
 const selectedTxids = ref<string[]>([])
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
@@ -59,9 +60,15 @@ const readyTxids = computed(() => (preview.value?.items ?? [])
   .map((item) => item.txid))
 const selectedReadyTxids = computed(() => selectedTxids.value
   .filter((txid) => readyTxids.value.includes(txid)))
+const requestPending = computed(() => previewing.value || importing.value)
+const previewMatchesInput = computed(() => sameTxids(previewedTxids.value, parsedTxids.value))
 
-const canPreview = computed(() => parsedTxids.value.length > 0 && !previewing.value)
-const canImport = computed(() => selectedReadyTxids.value.length > 0 && !importing.value)
+const canPreview = computed(() => parsedTxids.value.length > 0 && !requestPending.value)
+const canImport = computed(() => (
+  selectedReadyTxids.value.length > 0 &&
+  previewMatchesInput.value &&
+  !requestPending.value
+))
 
 async function previewImport(csrfToken: string): Promise<void> {
   if (!canPreview.value) {
@@ -75,6 +82,7 @@ async function previewImport(csrfToken: string): Promise<void> {
     const response = await previewHistoryImport(parsedTxids.value, csrfToken)
     if (response.ok) {
       preview.value = response.data
+      previewedTxids.value = [...parsedTxids.value]
       selectedTxids.value = response.data.items
         .filter((item) => item.status === 'ready')
         .map((item) => item.txid)
@@ -104,6 +112,7 @@ async function importSelected(csrfToken: string): Promise<void> {
     )
     if (response.ok) {
       preview.value = response.data
+      previewedTxids.value = [...previewTxids.value]
       selectedTxids.value = response.data.items
         .filter((item) => item.status === 'ready')
         .map((item) => item.txid)
@@ -117,6 +126,10 @@ async function importSelected(csrfToken: string): Promise<void> {
   } finally {
     importing.value = false
   }
+}
+
+function sameTxids(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((txid, index) => txid === right[index])
 }
 </script>
 
@@ -165,6 +178,7 @@ async function importSelected(csrfToken: string): Promise<void> {
         v-if="errorMessage || successMessage"
         class="status-line"
         :class="{ error: errorMessage, success: successMessage }"
+        :role="errorMessage ? 'alert' : 'status'"
       >
         {{ errorMessage || successMessage }}
       </p>
