@@ -22,6 +22,25 @@ from krakendca.order_history_csv import (
 
 ORDER_TXID_PATTERN = re.compile(r"^[A-Z0-9]{6}-[A-Z0-9]{5}-[A-Z0-9]{6}$")
 MAX_IMPORT_TXIDS = 50
+_KRAKEN_ASSET_ALIAS_GROUPS = (
+    frozenset({"XXBT", "XBT", "BTC"}),
+    frozenset({"XETH", "ETH"}),
+    frozenset({"XLTC", "LTC"}),
+    frozenset({"XETC", "ETC"}),
+    frozenset({"XMLN", "MLN"}),
+    frozenset({"XREP", "REP"}),
+    frozenset({"XZEC", "ZEC"}),
+    frozenset({"XXDG", "XDG", "DOGE"}),
+    frozenset({"XXLM", "XLM"}),
+    frozenset({"XXMR", "XMR"}),
+    frozenset({"XXRP", "XRP"}),
+    frozenset({"ZAUD", "AUD"}),
+    frozenset({"ZCAD", "CAD"}),
+    frozenset({"ZEUR", "EUR"}),
+    frozenset({"ZGBP", "GBP"}),
+    frozenset({"ZJPY", "JPY"}),
+    frozenset({"ZUSD", "USD"}),
+)
 
 
 @dataclass(frozen=True)
@@ -339,7 +358,35 @@ def _pair_aliases(pair_config: dict) -> set[str]:
     for key in ("pair", "altname", "alt_name", "wsname"):
         value = pair_config.get(key)
         if isinstance(value, str) and value:
-            aliases.add(value)
+            aliases.update(_pair_identifier_aliases(value))
+    return aliases
+
+
+def _pair_identifier_aliases(value: str) -> set[str]:
+    normalized = value.strip().upper()
+    if not normalized:
+        return set()
+
+    compact = re.sub(r"[^A-Z0-9.]", "", normalized)
+    aliases = {normalized, compact}
+    aliases.update(_kraken_legacy_pair_aliases(compact))
+    return {alias for alias in aliases if alias}
+
+
+def _kraken_legacy_pair_aliases(compact: str) -> set[str]:
+    aliases = set()
+    for base_group in _KRAKEN_ASSET_ALIAS_GROUPS:
+        for base in sorted(base_group, key=len, reverse=True):
+            if not compact.startswith(base):
+                continue
+            quote = compact[len(base):]
+            for quote_group in _KRAKEN_ASSET_ALIAS_GROUPS:
+                if quote not in quote_group:
+                    continue
+                for base_alias in base_group:
+                    for quote_alias in quote_group:
+                        aliases.add(f"{base_alias}{quote_alias}")
+                        aliases.add(f"{base_alias}/{quote_alias}")
     return aliases
 
 

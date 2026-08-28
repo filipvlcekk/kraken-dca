@@ -182,6 +182,30 @@ def test_preview_uses_pair_level_orders_filepath(tmp_path) -> None:
     assert item.target_path == tmp_path / "xeth-orders.csv"
 
 
+def test_preview_matches_kraken_altname_to_configured_canonical_pair(
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+
+    item = preview_order_import(
+        [READY_TXID],
+        {
+            READY_TXID: _kraken_order(
+                pair="XXBTZEUR",
+                configured_pair="XBTEUR",
+                description="buy 0.00022 XBTEUR @ limit 67001.2",
+            )
+        },
+        _config(pair="XXBTZEUR"),
+        str(config_path),
+    )[0]
+
+    assert item.status == "ready"
+    assert item.row is not None
+    assert item.row["pair"] == "XXBTZEUR"
+    assert item.target_path == tmp_path / "orders.csv"
+
+
 def test_preview_marks_existing_txid_already_imported(tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     _write_history(tmp_path / "orders.csv", [_row(txid=READY_TXID)])
