@@ -847,6 +847,16 @@ def test_login_rate_limits_repeated_failed_password_attempts(
     }
 
 
+def test_login_throttle_counts_reserved_attempts_before_failure_is_recorded() -> None:
+    throttle = auth.LoginThrottle(max_failures=1, global_max_failures=50)
+
+    assert throttle.reserve_attempt("client") is True
+    assert throttle.reserve_attempt("client") is False
+
+    throttle.record_failure("client")
+    assert throttle.reserve_attempt("client") is False
+
+
 def test_login_rejects_malformed_json_with_api_envelope(
     tmp_path, monkeypatch
 ) -> None:
@@ -865,6 +875,31 @@ def test_login_rejects_malformed_json_with_api_envelope(
     assert response.status_code == 400
     assert response.json()["ok"] is False
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_login_malformed_json_releases_reserved_attempt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _set_web_auth_env(monkeypatch)
+    app = create_app(
+        config_path=str(tmp_path / "missing.yaml"), static_dir=str(tmp_path)
+    )
+    app.state.login_throttle = auth.LoginThrottle(
+        max_failures=1,
+        global_max_failures=50,
+    )
+
+    with TestClient(app, base_url="https://testserver") as client:
+        malformed = client.post(
+            "/api/session",
+            content=b'{"password":',
+            headers={"Content-Type": "application/json"},
+        )
+        wrong_password = client.post("/api/session", json={"password": "wrong"})
+
+    assert malformed.status_code == 400
+    assert wrong_password.status_code == 401
 
 
 def test_login_rejects_invalid_utf8_json_with_api_envelope(

@@ -46,6 +46,8 @@ class LoginThrottle:
         self._window_seconds = window_seconds
         self._failures: dict[str, list[float]] = {}
         self._global_failures: list[float] = []
+        self._pending_attempts: dict[str, int] = {}
+        self._global_pending_attempts = 0
         self._lock = Lock()
 
     def is_allowed(self, client_key: str) -> bool:
@@ -53,19 +55,40 @@ class LoginThrottle:
         with self._lock:
             self._prune(now)
             return (
-                len(self._failures.get(client_key, [])) < self._max_failures
-                and len(self._global_failures) < self._global_max_failures
+                self._client_attempt_count(client_key) < self._max_failures
+                and self._global_attempt_count() < self._global_max_failures
             )
+
+    def reserve_attempt(self, client_key: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            if (
+                self._client_attempt_count(client_key) >= self._max_failures
+                or self._global_attempt_count() >= self._global_max_failures
+            ):
+                return False
+            self._pending_attempts[client_key] = (
+                self._pending_attempts.get(client_key, 0) + 1
+            )
+            self._global_pending_attempts += 1
+            return True
+
+    def release_attempt(self, client_key: str) -> None:
+        with self._lock:
+            self._release_attempt(client_key)
 
     def record_failure(self, client_key: str) -> None:
         now = time.monotonic()
         with self._lock:
             self._prune(now)
+            self._release_attempt(client_key)
             self._failures.setdefault(client_key, []).append(now)
             self._global_failures.append(now)
 
     def record_success(self, client_key: str) -> None:
         with self._lock:
+            self._release_attempt(client_key)
             self._failures.pop(client_key, None)
 
     def _prune(self, now: float) -> None:
@@ -79,6 +102,25 @@ class LoginThrottle:
                 self._failures[client_key] = recent
             else:
                 self._failures.pop(client_key, None)
+
+    def _client_attempt_count(self, client_key: str) -> int:
+        return len(self._failures.get(client_key, [])) + self._pending_attempts.get(
+            client_key,
+            0,
+        )
+
+    def _global_attempt_count(self) -> int:
+        return len(self._global_failures) + self._global_pending_attempts
+
+    def _release_attempt(self, client_key: str) -> None:
+        pending = self._pending_attempts.get(client_key, 0)
+        if pending <= 0:
+            return
+        if pending == 1:
+            self._pending_attempts.pop(client_key, None)
+        else:
+            self._pending_attempts[client_key] = pending - 1
+        self._global_pending_attempts = max(0, self._global_pending_attempts - 1)
 
 
 def require_web_password(env: Mapping[str, str] | None = None) -> str:
@@ -143,7 +185,7 @@ def verify_password(submitted: str, expected: str) -> bool:
 
 def require_login_allowed(request: Request) -> None:
     throttle: LoginThrottle = request.app.state.login_throttle
-    if not throttle.is_allowed(_client_key(request)):
+    if not throttle.reserve_attempt(_client_key(request)):
         raise ApiException(
             429,
             "rate_limited",
@@ -159,6 +201,11 @@ def record_login_failure(request: Request) -> None:
 def record_login_success(request: Request) -> None:
     throttle: LoginThrottle = request.app.state.login_throttle
     throttle.record_success(_client_key(request))
+
+
+def release_login_attempt(request: Request) -> None:
+    throttle: LoginThrottle = request.app.state.login_throttle
+    throttle.release_attempt(_client_key(request))
 
 
 def encode_session(
