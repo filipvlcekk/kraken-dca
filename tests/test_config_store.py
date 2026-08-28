@@ -398,6 +398,28 @@ def test_atomic_save_creates_timestamped_backup(tmp_path, monkeypatch) -> None:
     assert (tmp_path / "config.yaml.bak.20260721T120000Z").exists()
 
 
+def test_save_config_falls_back_when_atomic_replace_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import krakendca.config_store as config_store
+
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(valid_config()), encoding="utf-8")
+    submitted = valid_config()
+    submitted["dca_pairs"][0]["amount"] = 25
+
+    def fail_replace(_source, _target):
+        raise OSError("Device or resource busy")
+
+    monkeypatch.setattr(config_store.os, "replace", fail_replace)
+
+    save_config(str(path), submitted)
+
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert saved["dca_pairs"][0]["amount"] == 25.0
+
+
 def test_backup_retention_keeps_only_10_newest(tmp_path, monkeypatch) -> None:
     import krakendca.config_store as config_store
 

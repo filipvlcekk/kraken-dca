@@ -428,6 +428,20 @@ def test_import_appends_to_existing_valid_csv(tmp_path) -> None:
     ]
 
 
+def test_import_appends_after_header_without_trailing_newline(tmp_path) -> None:
+    target = tmp_path / "orders.csv"
+    target.write_text(",".join(ORDER_HISTORY_FIELDNAMES), encoding="utf-8")
+
+    result = import_order_history_rows(
+        [_ready_item(tmp_path)],
+        {READY_TXID},
+        {},
+    )
+
+    assert result.imported_count == 1
+    assert [row["txid"] for row in _read_history(target)] == [READY_TXID]
+
+
 def test_import_rejects_malformed_existing_header(tmp_path) -> None:
     target = tmp_path / "orders.csv"
     target.write_text("bad,header\nvalue,value\n", encoding="utf-8")

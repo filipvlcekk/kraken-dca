@@ -179,7 +179,12 @@ def save_config(path: str, submitted: dict, env: dict | None = None) -> dict:
             shutil.copy2(config_path, backup_path)
             _prune_backups(config_path)
 
-        os.replace(temp_path, config_path)
+        try:
+            os.replace(temp_path, config_path)
+        except OSError:
+            if not config_path.exists():
+                raise
+            _write_config_in_place(config_path, temp_path)
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
@@ -192,6 +197,12 @@ def fingerprint_config(config: dict, env: dict | None = None) -> str:
     redacted = redact_config(validate_config(config, env), env)
     canonical = json.dumps(redacted, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _write_config_in_place(config_path: Path, temp_path: str) -> None:
+    with open(temp_path, "r", encoding="utf-8") as source:
+        with config_path.open("w", encoding="utf-8") as target:
+            shutil.copyfileobj(source, target)
 
 
 def get_cli_dca_pairs(config: dict) -> list[dict]:

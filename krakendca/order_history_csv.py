@@ -114,6 +114,8 @@ def append_order_history_row(path: Path, row: dict[str, str]) -> None:
     write_header = not path.exists() or path.stat().st_size == 0
     mode = "w" if write_header else "a"
     try:
+        if not write_header:
+            _ensure_trailing_newline(path)
         with path.open(mode, newline="", encoding="utf-8") as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=ORDER_HISTORY_FIELDNAMES)
             if write_header:
@@ -121,3 +123,10 @@ def append_order_history_row(path: Path, row: dict[str, str]) -> None:
             writer.writerow(row)
     except (csv.Error, OSError) as exc:
         raise ValueError(f"Can't save order history -> {exc}") from exc
+
+
+def _ensure_trailing_newline(path: Path) -> None:
+    with path.open("rb+") as csv_file:
+        csv_file.seek(-1, 2)
+        if csv_file.read(1) not in {b"\n", b"\r"}:
+            csv_file.write(b"\n")
